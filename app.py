@@ -3,12 +3,20 @@ import folium
 from streamlit_folium import st_folium
 import requests
 import pandas as pd
+from datetime import datetime
+
+# --- 設定: 情報収集日時 ---
+# ※積雪・コース・営業状況などのデータを更新したら、ここも書き換えてください
+DATA_UPDATED = "2025年12月6日 22:30"
 
 # ページ設定
 st.set_page_config(page_title="秋田県近辺スキー場情報 (飯島起点)", layout="wide")
 
 st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
-st.markdown("##### 2025-2026シーズン 状況一覧 (秋田市飯島 起点)")
+st.markdown(f"##### 2025-2026シーズン 状況一覧 (秋田市飯島 起点)")
+
+# 更新日時の表示
+st.info(f"📅 **情報収集日時: {DATA_UPDATED}** 時点\n\n※積雪・コース数・営業状況はこの日時のものです。天気予報はアクセス時にリアルタイムで取得しています。")
 
 # --- データの定義 ---
 # distance: 秋田市飯島からの片道距離(km)
@@ -202,10 +210,10 @@ for resort in ski_resorts:
         "スキー場": resort["name"],
         "積雪": resort["snow"],
         "前日降雪": resort["snow_yest"],
-        "オープンコース数": course_disp, # 変更
-        "1日券": f"¥{resort['price']:,}", # 追加
+        "オープンコース数": course_disp,
+        "リフト券": f"¥{resort['price']:,}", # キー変更
         "天気(今/明)": f"{w['today']} → {w['tmrw']}",
-        "飯島から": f"{resort['distance']}km ({format_time(resort['time'])})", # 変更
+        "飯島から": f"{resort['distance']}km ({format_time(resort['time'])})",
         "予定": resort["open_date"],
         "リンク": resort["url"],
         "lat": resort["lat"],
@@ -217,17 +225,16 @@ df = pd.DataFrame(df_list)
 
 # --- 1. 一覧テーブル表示 ---
 st.subheader("📋 リアルタイム状況一覧")
-st.info("※「飯島から」の距離・時間は秋田市飯島エリアからの目安です（渋滞含まず）。料金は大人1日券の目安です。")
 
 st.data_editor(
-    df[["スキー場", "積雪", "前日降雪", "オープンコース数", "1日券", "天気(今/明)", "飯島から", "予定", "リンク"]],
+    df[["スキー場", "積雪", "前日降雪", "オープンコース数", "リフト券", "天気(今/明)", "飯島から", "予定", "リンク"]],
     column_config={
         "リンク": st.column_config.LinkColumn("公式サイト", display_text="🔗 HPへ"),
         "スキー場": st.column_config.TextColumn("スキー場", width="medium"),
         "積雪": st.column_config.TextColumn("積雪", width="small"),
         "前日降雪": st.column_config.TextColumn("前日降雪", width="small"),
         "オープンコース数": st.column_config.TextColumn("コース数(開/全)", width="medium"),
-        "1日券": st.column_config.TextColumn("1日券(大人)", width="small"),
+        "リフト券": st.column_config.TextColumn("リフト券 (大人1日)", width="small"), # 表示名変更
         "飯島から": st.column_config.TextColumn("飯島からの距離/時間", width="medium"),
         "予定": st.column_config.TextColumn("オープン", width="small"),
     },
@@ -239,7 +246,7 @@ st.data_editor(
 # --- 2. 地図表示 ---
 st.subheader("🗺️ マップ")
 
-m = folium.Map(location=[39.8, 140.5], zoom_start=9) # 中心を少し北へ
+m = folium.Map(location=[39.8, 140.5], zoom_start=9)
 
 for _, row in df.iterrows():
     icon_color = "red" if "営業中" in row['予定'] else "blue"
@@ -250,7 +257,7 @@ for _, row in df.iterrows():
         <hr style="margin:5px 0;">
         <b>積雪:</b> {row['積雪']}<br>
         <b>コース:</b> {row['オープンコース数']}<br>
-        <b>1日券:</b> {row['1日券']}<br>
+        <b>リフト券:</b> {row['リフト券']}<br>
         <b>距離:</b> {row['飯島から']}<br>
         <div style="margin-top:8px;">
             <a href="{row['リンク']}" target="_blank" style="background:#008CBA; color:white; padding:4px 8px; text-decoration:none; border-radius:3px; font-size:0.9em;">公式サイトを見る</a>

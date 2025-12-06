@@ -5,24 +5,25 @@ import requests
 import pandas as pd
 
 # ページ設定
-st.set_page_config(page_title="秋田県近辺のスキー場情報集約", layout="wide")
+st.set_page_config(page_title="秋田県近辺スキー場情報 (飯島起点)", layout="wide")
 
-st.title("⛷️ 秋田県近辺のスキー場リアルタイム情報集約")
-st.markdown("##### 2025-2026シーズン 状況一覧")
+st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
+st.markdown("##### 2025-2026シーズン 状況一覧 (秋田市飯島 起点)")
 
 # --- データの定義 ---
-# distance: 秋田駅からの片道距離(km)
-# time: 秋田駅からの車での標準所要時間(分) ※渋滞含まず
-# snow_yest: 前日の降雪量
+# distance: 秋田市飯島からの片道距離(km)
+# time: 秋田市飯島からの車での標準所要時間(分) ※一般道優先、遠方は高速利用想定
+# price: 大人1日券の標準価格(円)
 ski_resorts = [
-    # 営業中のスキー場
+    # 営業中・または主要スキー場
     {
         "name": "夏油高原スキー場", 
         "lat": 39.2178, "lon": 140.9242, 
         "snow": "100cm", "snow_yest": "30cm", 
         "status": "全面滑走可", "courses_open": 14, "courses_total": 14, 
         "open_date": "営業中", "url": "https://www.getokogen.com/",
-        "distance": 120, "time": 150 # 2時間30分
+        "distance": 110, "time": 105, # 秋田北IC利用想定
+        "price": 6800
     },
     {
         "name": "秋田八幡平スキー場", 
@@ -30,40 +31,8 @@ ski_resorts = [
         "snow": "80cm", "snow_yest": "10cm",
         "status": "一部滑走可", "courses_open": 2, "courses_total": 4, 
         "open_date": "営業中", "url": "https://www.akihachi.jp/",
-        "distance": 100, "time": 120 # 2時間
-    },
-    # オープン前のスキー場
-    {
-        "name": "たざわ湖スキー場", 
-        "lat": 39.7567, "lon": 140.7811, 
-        "snow": "-", "snow_yest": "-",
-        "status": "OPEN前", "courses_open": 0, "courses_total": 13, 
-        "open_date": "12/20予定", "url": "https://www.tazawako-ski.com/",
-        "distance": 70, "time": 90 # 1時間30分
-    },
-    {
-        "name": "森吉山阿仁スキー場", 
-        "lat": 39.9575, "lon": 140.4564, 
-        "snow": "-", "snow_yest": "-",
-        "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
-        "open_date": "12/7予定", "url": "https://www.aniski.jp/",
-        "distance": 93, "time": 110 # 1時間50分
-    },
-    {
-        "name": "花輪スキー場", 
-        "lat": 40.1833, "lon": 140.7871, 
-        "snow": "-", "snow_yest": "-",
-        "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
-        "open_date": "12月上旬", "url": "https://www.alpas.jp/",
-        "distance": 110, "time": 130 # 2時間10分
-    },
-    {
-        "name": "ジュネス栗駒スキー場", 
-        "lat": 39.1950, "lon": 140.6922, 
-        "snow": "-", "snow_yest": "-",
-        "status": "OPEN前", "courses_open": 0, "courses_total": 12, 
-        "open_date": "12月中旬", "url": "https://jeunesse-ski.com/",
-        "distance": 100, "time": 100 # 1時間40分
+        "distance": 95, "time": 110, # 五城目経由
+        "price": 4000
     },
     {
         "name": "太平山スキー場オーパス", 
@@ -71,7 +40,26 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
         "open_date": "12/21予定", "url": "http://www.theboon.net/opas/",
-        "distance": 15, "time": 30 # 30分
+        "distance": 15, "time": 25,
+        "price": 2200
+    },
+    {
+        "name": "森吉山阿仁スキー場", 
+        "lat": 39.9575, "lon": 140.4564, 
+        "snow": "-", "snow_yest": "-",
+        "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
+        "open_date": "12/7予定", "url": "https://www.aniski.jp/",
+        "distance": 85, "time": 90, # 五城目経由
+        "price": 4500
+    },
+    {
+        "name": "たざわ湖スキー場", 
+        "lat": 39.7567, "lon": 140.7811, 
+        "snow": "-", "snow_yest": "-",
+        "status": "OPEN前", "courses_open": 0, "courses_total": 13, 
+        "open_date": "12/20予定", "url": "https://www.tazawako-ski.com/",
+        "distance": 75, "time": 85,
+        "price": 5300
     },
     {
         "name": "協和スキー場", 
@@ -79,7 +67,26 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
         "open_date": "12/27予定", "url": "https://kyowasnow.net/",
-        "distance": 30, "time": 45 # 45分
+        "distance": 40, "time": 50,
+        "price": 3300
+    },
+    {
+        "name": "花輪スキー場", 
+        "lat": 40.1833, "lon": 140.7871, 
+        "snow": "-", "snow_yest": "-",
+        "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
+        "open_date": "12月上旬", "url": "https://www.alpas.jp/",
+        "distance": 100, "time": 110, # 五城目経由
+        "price": 3400
+    },
+    {
+        "name": "ジュネス栗駒スキー場", 
+        "lat": 39.1950, "lon": 140.6922, 
+        "snow": "-", "snow_yest": "-",
+        "status": "OPEN前", "courses_open": 0, "courses_total": 12, 
+        "open_date": "12月中旬", "url": "https://jeunesse-ski.com/",
+        "distance": 110, "time": 110, # 高速利用推奨
+        "price": 4000
     },
     {
         "name": "鳥海高原矢島スキー場", 
@@ -87,7 +94,8 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 6, 
         "open_date": "12月中旬", "url": "https://www.yashimaski.com/",
-        "distance": 70, "time": 90 # 1時間30分
+        "distance": 85, "time": 100,
+        "price": 3000
     },
     {
         "name": "水晶山スキー場", 
@@ -95,7 +103,8 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 4, 
         "open_date": "12月下旬", "url": "https://www.city.shizukuishi.iwate.jp/",
-        "distance": 60, "time": 90 # 1時間30分 (雫石側と仮定)
+        "distance": 85, "time": 95,
+        "price": 3000
     },
     {
         "name": "大台スキー場", 
@@ -103,7 +112,8 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 6, 
         "open_date": "1月上旬", "url": "https://ohdai.omagari-sc.com/",
-        "distance": 50, "time": 60 # 60分
+        "distance": 60, "time": 70,
+        "price": 3100
     },
     {
         "name": "天下森スキー場", 
@@ -111,7 +121,8 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 2, 
         "open_date": "12月下旬", "url": "https://www.city.yokote.lg.jp/kanko/1004655/1004664/1001402.html",
-        "distance": 80, "time": 90 # 1時間30分
+        "distance": 90, "time": 100,
+        "price": 2700
     },
     {
         "name": "大曲ファミリースキー場", 
@@ -119,7 +130,8 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 1, 
         "open_date": "12月下旬", "url": "https://www.city.daisen.lg.jp/docs/2013110300234/",
-        "distance": 50, "time": 50 # 50分
+        "distance": 55, "time": 60,
+        "price": 2400
     },
     {
         "name": "稲川スキー場", 
@@ -127,7 +139,8 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 2, 
         "open_date": "12月下旬", "url": "https://www.city-yuzawa.jp/site/inakawaski/",
-        "distance": 90, "time": 100 # 1時間40分
+        "distance": 100, "time": 110,
+        "price": 2500
     }
 ]
 
@@ -150,16 +163,11 @@ def get_weather_batch():
                 data = res.json()
                 code_today = data['daily']['weathercode'][0]
                 code_tmrw = data['daily']['weathercode'][1]
-                
-                # 天気コード変換
                 w_map = {0:"☀️", 1:"🌤️", 2:"☁️", 3:"☁️", 45:"🌫️", 51:"🌧️", 53:"🌧️", 55:"🌧️", 61:"☔", 63:"☔", 71:"☃️", 73:"☃️", 75:"☃️", 77:"🌨️", 80:"🌦️", 85:"🌨️", 95:"⚡"}
                 
-                weather_today = f"{w_map.get(code_today, '❓')}"
-                weather_tmrw = f"{w_map.get(code_tmrw, '❓')}"
-                
                 results[resort["name"]] = {
-                    "today": weather_today,
-                    "tmrw": weather_tmrw
+                    "today": f"{w_map.get(code_today, '❓')}",
+                    "tmrw": f"{w_map.get(code_tmrw, '❓')}"
                 }
             else:
                 results[resort["name"]] = {"today": "-", "tmrw": "-"}
@@ -167,9 +175,8 @@ def get_weather_batch():
             results[resort["name"]] = {"today": "-", "tmrw": "-"}
     return results
 
-# --- 表示用のヘルパー関数 ---
+# --- 表示用ヘルパー ---
 def format_time(minutes):
-    """分を「X時間Y分」形式に変換"""
     h = minutes // 60
     m = minutes % 60
     if h > 0:
@@ -178,16 +185,14 @@ def format_time(minutes):
 
 # --- メイン処理 ---
 
-# 天気データの取得
 with st.spinner('最新の天気情報を取得中...'):
     weather_data = get_weather_batch()
 
-# 一覧表用のデータフレーム作成
 df_list = []
 for resort in ski_resorts:
     w = weather_data.get(resort["name"], {"today": "-", "tmrw": "-"})
     
-    # コース表記を作成 (例: 14/14)
+    # コース表記
     if resort["status"] == "OPEN前":
         course_disp = "-"
     else:
@@ -197,9 +202,10 @@ for resort in ski_resorts:
         "スキー場": resort["name"],
         "積雪": resort["snow"],
         "前日降雪": resort["snow_yest"],
-        "オープンコース (開/全)": course_disp,
+        "オープンコース数": course_disp, # 変更
+        "1日券": f"¥{resort['price']:,}", # 追加
         "天気(今/明)": f"{w['today']} → {w['tmrw']}",
-        "秋田駅から": f"{resort['distance']}km ({format_time(resort['time'])})",
+        "飯島から": f"{resort['distance']}km ({format_time(resort['time'])})", # 変更
         "予定": resort["open_date"],
         "リンク": resort["url"],
         "lat": resort["lat"],
@@ -211,21 +217,19 @@ df = pd.DataFrame(df_list)
 
 # --- 1. 一覧テーブル表示 ---
 st.subheader("📋 リアルタイム状況一覧")
-st.info("※距離・時間は秋田駅からの目安です。リアルタイム渋滞情報は反映されていません。")
+st.info("※「飯島から」の距離・時間は秋田市飯島エリアからの目安です（渋滞含まず）。料金は大人1日券の目安です。")
 
-# データフレームを表示
 st.data_editor(
-    df[["スキー場", "積雪", "前日降雪", "オープンコース (開/全)", "天気(今/明)", "秋田駅から", "予定", "リンク"]],
+    df[["スキー場", "積雪", "前日降雪", "オープンコース数", "1日券", "天気(今/明)", "飯島から", "予定", "リンク"]],
     column_config={
-        "リンク": st.column_config.LinkColumn(
-            "公式サイト", display_text="🔗 HPへ"
-        ),
+        "リンク": st.column_config.LinkColumn("公式サイト", display_text="🔗 HPへ"),
         "スキー場": st.column_config.TextColumn("スキー場", width="medium"),
-        "積雪": st.column_config.TextColumn("積雪深", width="small"),
+        "積雪": st.column_config.TextColumn("積雪", width="small"),
         "前日降雪": st.column_config.TextColumn("前日降雪", width="small"),
-        "オープンコース (開/全)": st.column_config.TextColumn("オープンコース", width="medium"),
-        "秋田駅から": st.column_config.TextColumn("距離と時間(目安)", width="medium"),
-        "予定": st.column_config.TextColumn("オープン日", width="small"),
+        "オープンコース数": st.column_config.TextColumn("コース数(開/全)", width="medium"),
+        "1日券": st.column_config.TextColumn("1日券(大人)", width="small"),
+        "飯島から": st.column_config.TextColumn("飯島からの距離/時間", width="medium"),
+        "予定": st.column_config.TextColumn("オープン", width="small"),
     },
     hide_index=True,
     disabled=True,
@@ -235,19 +239,19 @@ st.data_editor(
 # --- 2. 地図表示 ---
 st.subheader("🗺️ マップ")
 
-m = folium.Map(location=[39.6, 140.6], zoom_start=9)
+m = folium.Map(location=[39.8, 140.5], zoom_start=9) # 中心を少し北へ
 
 for _, row in df.iterrows():
-    # マーカーの色分け
     icon_color = "red" if "営業中" in row['予定'] else "blue"
     
     html = f"""
     <div style="font-family:sans-serif; width:220px;">
         <h5 style="margin:0 0 5px 0;">{row['スキー場']}</h5>
         <hr style="margin:5px 0;">
-        <b>積雪:</b> {row['積雪']} (前日: {row['前日降雪']})<br>
-        <b>コース:</b> {row['オープンコース (開/全)']}<br>
-        <b>距離:</b> {row['秋田駅から']}<br>
+        <b>積雪:</b> {row['積雪']}<br>
+        <b>コース:</b> {row['オープンコース数']}<br>
+        <b>1日券:</b> {row['1日券']}<br>
+        <b>距離:</b> {row['飯島から']}<br>
         <div style="margin-top:8px;">
             <a href="{row['リンク']}" target="_blank" style="background:#008CBA; color:white; padding:4px 8px; text-decoration:none; border-radius:3px; font-size:0.9em;">公式サイトを見る</a>
         </div>

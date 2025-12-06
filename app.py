@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 設定 ---
-DATA_UPDATED = "2025年12月7日 08:30"
+DATA_UPDATED = "2025年12月7日 09:00"
 
 st.set_page_config(page_title="秋田県近辺スキー場情報", layout="wide")
 
@@ -21,7 +21,7 @@ str_yest = yesterday.strftime("%m/%d")
 # --- CSS (スタイル定義) ---
 st.markdown("""
 <style>
-    /* テーブルコンテナ */
+    /* テーブル */
     .table-container {
         max-height: 600px; overflow: auto; border: 1px solid #ddd;
         border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 30px;
@@ -36,17 +36,12 @@ st.markdown("""
     tbody tr:nth-child(even) { background-color: #f8f9fa; }
     tbody tr:nth-child(even) td:first-child { background-color: #f8f9fa; }
 
-    /* HPリンクボタン */
+    /* リンクボタン */
     .link-btn {
         background-color: #fff; border: 1px solid #008CBA; color: #008CBA;
         padding: 4px 12px; text-decoration: none; border-radius: 4px; font-size: 12px; display: inline-block;
     }
     .link-btn:hover { background-color: #f0f8ff; }
-    
-    /* カメラエリアのタイトル */
-    .cam-title {
-        font-weight: bold; color: #333; margin-bottom: 5px; font-size: 0.95em;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -58,25 +53,27 @@ st.sidebar.header("🔍 絞り込み検索")
 filter_open_only = st.sidebar.checkbox("今シーズン営業中のみを表示", value=False)
 
 # --- データ定義 ---
-# yt_id: YouTube動画ID (サムネイル自動取得用)
-# live_url: クリック時の飛び先
+# groomed: 圧雪コース数
+# ungroomed: 非圧雪コース数
 ski_resorts = [
     {
         "name": "夏油高原スキー場", 
         "lat": 39.2178, "lon": 140.9242, 
         "snow": "100cm", "snow_yest": "30cm", 
         "status": "全面滑走可", "courses_open": 14, "courses_total": 14, 
+        "groomed": 10, "ungroomed": 4, # 夏油は非圧雪エリアが多い
         "open_date": "営業中", "url": "https://www.getokogen.com/",
         "distance": 139, "time": 115, 
         "price": 6800, "check_date": "12/6 10:00",
         "live_url": "https://www.youtube.com/@getokogen/live",
-        "yt_id": "Vo9xtIyktUY" # 最新の動画IDに適宜変更
+        "yt_id": "Vo9xtIyktUY"
     },
     {
         "name": "秋田八幡平スキー場", 
         "lat": 39.9922, "lon": 140.8358, 
         "snow": "80cm", "snow_yest": "10cm",
         "status": "一部滑走可", "courses_open": 2, "courses_total": 4, 
+        "groomed": 2, "ungroomed": 2,
         "open_date": "営業中", "url": "https://www.akihachi.jp/",
         "distance": 105, "time": 115, 
         "price": 4000, "check_date": "12/6 09:30",
@@ -87,6 +84,7 @@ ski_resorts = [
         "lat": 39.9575, "lon": 140.4564, 
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
+        "groomed": 3, "ungroomed": 2, # 阿仁はバックカントリー的要素が強い
         "open_date": "12/7予定", "url": "https://www.aniski.jp/",
         "distance": 79, "time": 85, 
         "price": 4500, "check_date": "12/5 18:00",
@@ -97,6 +95,7 @@ ski_resorts = [
         "lat": 39.7567, "lon": 140.7811, 
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 13, 
+        "groomed": 9, "ungroomed": 4,
         "open_date": "12/20予定", "url": "https://www.tazawako-ski.com/",
         "distance": 78, "time": 90, 
         "price": 5300, "check_date": "12/6 12:00",
@@ -107,6 +106,7 @@ ski_resorts = [
         "lat": 39.7894, "lon": 140.1983, 
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
+        "groomed": 5, "ungroomed": 0,
         "open_date": "12/21予定", "url": "http://www.theboon.net/opas/",
         "distance": 22, "time": 30, 
         "price": 2200, "check_date": "12/4 15:00",
@@ -117,6 +117,7 @@ ski_resorts = [
         "lat": 39.1950, "lon": 140.6922, 
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 12, 
+        "groomed": 10, "ungroomed": 2,
         "open_date": "12月中旬", "url": "https://jeunesse-ski.com/",
         "distance": 110, "time": 95, 
         "price": 4000, "check_date": "12/1 10:00",
@@ -127,6 +128,7 @@ ski_resorts = [
         "lat": 39.1866, "lon": 140.1264, 
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 6, 
+        "groomed": 5, "ungroomed": 1,
         "open_date": "12月中旬", "url": "https://www.yashimaski.com/",
         "distance": 91, "time": 85, 
         "price": 3000, "check_date": "12/1 10:00",
@@ -137,6 +139,7 @@ ski_resorts = [
         "lat": 39.6384, "lon": 140.3230, 
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
+        "groomed": 7, "ungroomed": 0,
         "open_date": "12/27予定", "url": "https://kyowasnow.net/",
         "distance": 45, "time": 50, 
         "price": 3300, "check_date": "12/1 10:00",
@@ -144,26 +147,32 @@ ski_resorts = [
     },
     {
         "name": "花輪スキー場", "lat": 40.1833, "lon": 140.7871, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
+        "groomed": 7, "ungroomed": 0,
         "open_date": "12月上旬", "url": "https://www.alpas.jp/", "distance": 112, "time": 115, "price": 3400, "check_date": "12/5 09:00"
     },
     {
         "name": "水晶山スキー場", "lat": 39.7344, "lon": 140.6275, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 4, 
+        "groomed": 4, "ungroomed": 0,
         "open_date": "12月下旬", "url": "https://www.city.shizukuishi.iwate.jp/", "distance": 88, "time": 90, "price": 3000, "check_date": "12/1 10:00"
     },
     {
         "name": "大台スキー場", "lat": 39.4625, "lon": 140.5592, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 6, 
+        "groomed": 6, "ungroomed": 0,
         "open_date": "1月上旬", "url": "https://ohdai.omagari-sc.com/", "distance": 65, "time": 60, "price": 3100, "check_date": "12/1 10:00"
     },
     {
         "name": "天下森スキー場", "lat": 39.2775, "lon": 140.5986, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 2, 
+        "groomed": 2, "ungroomed": 0,
         "open_date": "12月下旬", "url": "https://www.city.yokote.lg.jp/kanko/1004655/1004664/1001402.html", "distance": 95, "time": 85, "price": 2700, "check_date": "12/1 10:00"
     },
     {
         "name": "大曲ファミリー", "lat": 39.4283, "lon": 140.5231, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 1, 
+        "groomed": 1, "ungroomed": 0,
         "open_date": "12月下旬", "url": "https://www.city.daisen.lg.jp/docs/2013110300234/", "distance": 60, "time": 55, "price": 2400, "check_date": "12/1 10:00"
     },
     {
         "name": "稲川スキー場", "lat": 39.0681, "lon": 140.5894, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 2, 
+        "groomed": 2, "ungroomed": 0,
         "open_date": "12月下旬", "url": "https://www.city-yuzawa.jp/site/inakawaski/", "distance": 105, "time": 95, "price": 2500, "check_date": "12/1 10:00"
     }
 ]
@@ -209,7 +218,7 @@ with st.spinner('データ取得中...'):
     weather_data = get_weather_batch()
 
 df_list = []
-camera_data = [] # カメラ用データ
+camera_data = []
 
 count_hit = 0
 
@@ -223,15 +232,18 @@ for resort in ski_resorts:
     
     time_winter = int(resort["time"] * 1.35)
     
-    # 文言修正：「営業中」→「オープン済み」
+    # オープン状況
     open_txt = resort["open_date"]
     if "営業中" in open_txt:
         open_txt = "✅ オープン済み"
 
     if resort["status"] == "OPEN前":
         course_disp = "-"
+        condition_disp = "-"
     else:
         course_disp = f"{resort['courses_open']} / {resort['courses_total']}"
+        # コンディション情報（圧雪/非圧雪）
+        condition_disp = f"{resort['groomed']} / {resort['ungroomed']}"
     
     link_html = f'<a href="{resort["url"]}" target="_blank" class="link-btn">公式HP</a>'
 
@@ -240,6 +252,7 @@ for resort in ski_resorts:
         "積雪": resort["snow"],
         f"前日降雪<br><span style='font-size:0.8em'>({str_yest})</span>": resort["snow_yest"],
         "コース数<br><span style='font-size:0.8em'>(開/全)</span>": course_disp,
+        "コース内訳<br><span style='font-size:0.8em'>(圧雪/非圧雪)</span>": condition_disp, # 新規追加列
         "リフト券<br><span style='font-size:0.8em'>(大人1日)</span>": f"¥{resort['price']:,}",
         f"天気<br><span style='font-size:0.8em'>({str_today}→{str_tmrw})</span>": f"{w['today']} → {w['tmrw']}",
         "飯島から<br><span style='font-size:0.8em'>(距離/時間)</span>": f"{resort['distance']}km<br>{format_time(time_winter)}",
@@ -252,7 +265,7 @@ for resort in ski_resorts:
     if resort.get("live_url"):
         camera_data.append(resort)
 
-# --- 表示エリア ---
+# --- 表示 ---
 st.warning("""
 **「リアルタイム渋滞情報は反映していません。」**
 \n※表示時間はGoogleマップ標準時間＋35%（冬道想定）で算出しています。
@@ -292,12 +305,11 @@ else:
         ).add_to(m)
     st_folium(m, width="100%", height=600)
 
-    # 3. ライブカメラギャラリー (安全な実装)
+    # 3. ライブカメラ (サムネイルクリック式)
     st.divider()
     st.subheader("📷 ライブカメラ (サムネイルクリックで確認)")
     st.markdown("クリックすると各スキー場のライブカメラページへ移動します。")
 
-    # グリッドレイアウトを手動で作成（HTML崩れ防止のためst.columnsを使用）
     cols_per_row = 3
     rows = [camera_data[i:i + cols_per_row] for i in range(0, len(camera_data), cols_per_row)]
 
@@ -305,19 +317,13 @@ else:
         cols = st.columns(cols_per_row)
         for idx, cam in enumerate(row):
             with cols[idx]:
-                # サムネイル画像の決定
                 if cam.get("yt_id"):
-                    # YouTube
                     thumb = f"https://img.youtube.com/vi/{cam['yt_id']}/mqdefault.jpg"
                 else:
-                    # Placehold.coを使って動的に「スキー場名入り画像」を生成（これが確実です）
-                    # 文字化け防止のため英語表記風または単純化
                     safe_name = cam['name'].replace("スキー場", "").replace(" ", "")
-                    # 色: 営業中なら青、準備中ならグレー
                     bg = "008CBA" if "営業中" in cam['open_date'] else "6c757d"
                     thumb = f"https://placehold.co/600x338/{bg}/FFFFFF/png?text={safe_name}+LIVE"
 
-                # Markdownのリンク付き画像構文を使用（HTMLタグを使わないので崩れません）
                 st.markdown(f"**{cam['name']}**")
                 st.markdown(f"[![{cam['name']}]({thumb})]({cam['live_url']})")
                 st.caption("👆 クリックして映像を確認")

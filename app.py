@@ -3,11 +3,10 @@ import folium
 from streamlit_folium import st_folium
 import requests
 import pandas as pd
-import time
 from datetime import datetime, timedelta
 
 # --- 設定 ---
-DATA_UPDATED = "2025年12月7日 08:00"
+DATA_UPDATED = "2025年12月7日 08:30"
 
 st.set_page_config(page_title="秋田県近辺スキー場情報", layout="wide")
 
@@ -22,7 +21,7 @@ str_yest = yesterday.strftime("%m/%d")
 # --- CSS (スタイル定義) ---
 st.markdown("""
 <style>
-    /* テーブル */
+    /* テーブルコンテナ */
     .table-container {
         max-height: 600px; overflow: auto; border: 1px solid #ddd;
         border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 30px;
@@ -37,73 +36,16 @@ st.markdown("""
     tbody tr:nth-child(even) { background-color: #f8f9fa; }
     tbody tr:nth-child(even) td:first-child { background-color: #f8f9fa; }
 
-    /* リンクボタン */
+    /* HPリンクボタン */
     .link-btn {
         background-color: #fff; border: 1px solid #008CBA; color: #008CBA;
         padding: 4px 12px; text-decoration: none; border-radius: 4px; font-size: 12px; display: inline-block;
     }
     .link-btn:hover { background-color: #f0f8ff; }
-
-    /* ライブカメラカード（完成版） */
-    .cam-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-        gap: 20px;
-        margin-top: 20px;
-    }
-    .cam-card {
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        overflow: hidden;
-        background: white;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        transition: transform 0.2s;
-        text-decoration: none !important;
-        color: inherit !important;
-        display: block;
-    }
-    .cam-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-    }
-    .cam-thumb-container {
-        position: relative;
-        width: 100%;
-        padding-top: 56.25%; /* 16:9 Aspect Ratio */
-        background-color: #eee;
-    }
-    .cam-img {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-    .cam-info {
-        padding: 10px;
-        background: white;
-        border-top: 1px solid #eee;
-    }
+    
+    /* カメラエリアのタイトル */
     .cam-title {
-        font-weight: bold;
-        font-size: 1em;
-        margin-bottom: 4px;
-        color: #333;
-    }
-    .cam-badge {
-        display: inline-block;
-        background-color: #cc0000;
-        color: white;
-        font-size: 0.7em;
-        padding: 2px 6px;
-        border-radius: 4px;
-        vertical-align: middle;
-        margin-right: 5px;
-    }
-    .cam-status {
-        font-size: 0.8em;
-        color: #666;
+        font-weight: bold; color: #333; margin-bottom: 5px; font-size: 0.95em;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -116,8 +58,8 @@ st.sidebar.header("🔍 絞り込み検索")
 filter_open_only = st.sidebar.checkbox("今シーズン営業中のみを表示", value=False)
 
 # --- データ定義 ---
-# yt_id: YouTubeの動画ID (これがあればサムネイルを自動生成します)
-# img_url: 直接の画像URL (YouTubeがない場合)
+# yt_id: YouTube動画ID (サムネイル自動取得用)
+# live_url: クリック時の飛び先
 ski_resorts = [
     {
         "name": "夏油高原スキー場", 
@@ -128,7 +70,7 @@ ski_resorts = [
         "distance": 139, "time": 115, 
         "price": 6800, "check_date": "12/6 10:00",
         "live_url": "https://www.youtube.com/@getokogen/live",
-        "yt_id": "Vo9xtIyktUY" # ダミーID(Shortsなど)。実運用では最新のLive配信IDを入れる
+        "yt_id": "Vo9xtIyktUY" # 最新の動画IDに適宜変更
     },
     {
         "name": "秋田八幡平スキー場", 
@@ -138,8 +80,7 @@ ski_resorts = [
         "open_date": "営業中", "url": "https://www.akihachi.jp/",
         "distance": 105, "time": 115, 
         "price": 4000, "check_date": "12/6 09:30",
-        "live_url": "https://www.akihachi.jp/",
-        "img_url": "https://images.unsplash.com/photo-1551524559-8af4e6624178?auto=format&fit=crop&w=600&q=80" # ダミー
+        "live_url": "https://www.akihachi.jp/"
     },
     {
         "name": "森吉山阿仁スキー場", 
@@ -149,8 +90,7 @@ ski_resorts = [
         "open_date": "12/7予定", "url": "https://www.aniski.jp/",
         "distance": 79, "time": 85, 
         "price": 4500, "check_date": "12/5 18:00",
-        "live_url": "https://www.aniski.jp/livecam/",
-        "img_url": "https://images.unsplash.com/photo-1547623644-d2b56a125195?auto=format&fit=crop&w=600&q=80" # ダミー
+        "live_url": "https://www.aniski.jp/livecam/"
     },
     {
         "name": "たざわ湖スキー場", 
@@ -160,8 +100,7 @@ ski_resorts = [
         "open_date": "12/20予定", "url": "https://www.tazawako-ski.com/",
         "distance": 78, "time": 90, 
         "price": 5300, "check_date": "12/6 12:00",
-        "live_url": "http://www.tazawako-ski.com/gelande/",
-        "img_url": "https://images.unsplash.com/photo-1485594050903-8e8ee5322318?auto=format&fit=crop&w=600&q=80" # ダミー
+        "live_url": "http://www.tazawako-ski.com/gelande/"
     },
     {
         "name": "太平山スキー場オーパス", 
@@ -171,8 +110,7 @@ ski_resorts = [
         "open_date": "12/21予定", "url": "http://www.theboon.net/opas/",
         "distance": 22, "time": 30, 
         "price": 2200, "check_date": "12/4 15:00",
-        "live_url": "http://www.theboon.net/opas/livecam.html",
-        "yt_id": "live" # チャンネルLive用
+        "live_url": "http://www.theboon.net/opas/livecam.html"
     },
     {
         "name": "ジュネス栗駒スキー場", 
@@ -182,8 +120,7 @@ ski_resorts = [
         "open_date": "12月中旬", "url": "https://jeunesse-ski.com/",
         "distance": 110, "time": 95, 
         "price": 4000, "check_date": "12/1 10:00",
-        "live_url": "https://jeunesse-ski.com/live-camera/",
-        "img_url": "https://images.unsplash.com/photo-1605540436563-5bca919bdd76?auto=format&fit=crop&w=600&q=80"
+        "live_url": "https://jeunesse-ski.com/live-camera/"
     },
     {
         "name": "鳥海高原矢島スキー場", 
@@ -193,8 +130,7 @@ ski_resorts = [
         "open_date": "12月中旬", "url": "https://www.yashimaski.com/",
         "distance": 91, "time": 85, 
         "price": 3000, "check_date": "12/1 10:00",
-        "live_url": "https://ski.city.yurihonjo.lg.jp/live-camera/",
-        "img_url": "https://images.unsplash.com/photo-1518047601542-79f18c655718?auto=format&fit=crop&w=600&q=80"
+        "live_url": "https://ski.city.yurihonjo.lg.jp/live-camera/"
     },
     {
         "name": "協和スキー場", 
@@ -204,8 +140,7 @@ ski_resorts = [
         "open_date": "12/27予定", "url": "https://kyowasnow.net/",
         "distance": 45, "time": 50, 
         "price": 3300, "check_date": "12/1 10:00",
-        "live_url": "https://kyowasnow.net/",
-        "img_url": "https://images.unsplash.com/photo-1562608546-27eb84478d10?auto=format&fit=crop&w=600&q=80"
+        "live_url": "https://kyowasnow.net/"
     },
     {
         "name": "花輪スキー場", "lat": 40.1833, "lon": 140.7871, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
@@ -274,7 +209,7 @@ with st.spinner('データ取得中...'):
     weather_data = get_weather_batch()
 
 df_list = []
-camera_data = [] 
+camera_data = [] # カメラ用データ
 
 count_hit = 0
 
@@ -288,10 +223,10 @@ for resort in ski_resorts:
     
     time_winter = int(resort["time"] * 1.35)
     
-    # オープン状況の文言変更
-    open_date_disp = resort["open_date"]
-    if "営業中" in open_date_disp:
-        open_date_disp = "✅ オープン済み"
+    # 文言修正：「営業中」→「オープン済み」
+    open_txt = resort["open_date"]
+    if "営業中" in open_txt:
+        open_txt = "✅ オープン済み"
 
     if resort["status"] == "OPEN前":
         course_disp = "-"
@@ -308,7 +243,7 @@ for resort in ski_resorts:
         "リフト券<br><span style='font-size:0.8em'>(大人1日)</span>": f"¥{resort['price']:,}",
         f"天気<br><span style='font-size:0.8em'>({str_today}→{str_tmrw})</span>": f"{w['today']} → {w['tmrw']}",
         "飯島から<br><span style='font-size:0.8em'>(距離/時間)</span>": f"{resort['distance']}km<br>{format_time(time_winter)}",
-        "オープン予定": open_date_disp, # 変更後の変数を使用
+        "オープン予定": open_txt,
         "情報確認": resort["check_date"],
         "リンク": link_html,
         "lat": resort["lat"], "lon": resort["lon"], "status_raw": resort["status"]
@@ -317,7 +252,7 @@ for resort in ski_resorts:
     if resort.get("live_url"):
         camera_data.append(resort)
 
-# --- 表示 ---
+# --- 表示エリア ---
 st.warning("""
 **「リアルタイム渋滞情報は反映していません。」**
 \n※表示時間はGoogleマップ標準時間＋35%（冬道想定）で算出しています。
@@ -328,20 +263,18 @@ if count_hit == 0:
 else:
     df = pd.DataFrame(df_list)
 
-    # --- 1. 一覧テーブル ---
+    # 1. 一覧テーブル
     st.subheader(f"📋 リアルタイム状況一覧 ({count_hit}件)")
     st.info(f"📅 **情報確認日時: {DATA_UPDATED}**")
     
     table_html = df.drop(columns=["lat", "lon", "status_raw"]).to_html(classes="table", escape=False, index=False)
     st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
 
-    # --- 2. 地図表示 ---
+    # 2. マップ
     st.subheader("🗺️ マップ")
     m = folium.Map(location=[39.8, 140.5], zoom_start=9)
     for _, row in df.iterrows():
-        # オープン済みかどうかでアイコン色変更
         icon_color = "red" if "オープン済み" in row['オープン予定'] else "blue"
-        
         html = f"""
         <div style="font-family:sans-serif; width:220px;">
             <h5 style="margin:0 0 5px 0;">{row['スキー場名']}</h5>
@@ -359,39 +292,32 @@ else:
         ).add_to(m)
     st_folium(m, width="100%", height=600)
 
-    # --- 3. ライブカメラギャラリー (サムネイル表示版) ---
+    # 3. ライブカメラギャラリー (安全な実装)
     st.divider()
     st.subheader("📷 ライブカメラ (サムネイルクリックで確認)")
     st.markdown("クリックすると各スキー場のライブカメラページへ移動します。")
 
-    # グリッドレイアウト
-    html_cam = '<div class="cam-grid">'
-    
-    for cam in camera_data:
-        # サムネイルURLの決定
-        if cam.get("yt_id"):
-            # YouTubeの場合: 自動サムネイル取得
-            thumb_url = f"https://img.youtube.com/vi/{cam['yt_id']}/mqdefault.jpg"
-        elif cam.get("img_url"):
-            # 直接画像がある場合(ダミー含む)
-            thumb_url = cam['img_url']
-        else:
-            # フォールバック
-            thumb_url = "https://placehold.co/600x338/cccccc/666666/png?text=No+Image"
+    # グリッドレイアウトを手動で作成（HTML崩れ防止のためst.columnsを使用）
+    cols_per_row = 3
+    rows = [camera_data[i:i + cols_per_row] for i in range(0, len(camera_data), cols_per_row)]
 
-        html_cam += f"""
-        <a href="{cam['live_url']}" target="_blank" class="cam-card">
-            <div class="cam-thumb-container">
-                <img src="{thumb_url}" class="cam-img" loading="lazy">
-            </div>
-            <div class="cam-info">
-                <div class="cam-title">
-                    <span class="cam-badge">LIVE</span>{cam['name']}
-                </div>
-                <div class="cam-status">クリックして映像を確認 🔗</div>
-            </div>
-        </a>
-        """
-    
-    html_cam += '</div>'
-    st.markdown(html_cam, unsafe_allow_html=True)
+    for row in rows:
+        cols = st.columns(cols_per_row)
+        for idx, cam in enumerate(row):
+            with cols[idx]:
+                # サムネイル画像の決定
+                if cam.get("yt_id"):
+                    # YouTube
+                    thumb = f"https://img.youtube.com/vi/{cam['yt_id']}/mqdefault.jpg"
+                else:
+                    # Placehold.coを使って動的に「スキー場名入り画像」を生成（これが確実です）
+                    # 文字化け防止のため英語表記風または単純化
+                    safe_name = cam['name'].replace("スキー場", "").replace(" ", "")
+                    # 色: 営業中なら青、準備中ならグレー
+                    bg = "008CBA" if "営業中" in cam['open_date'] else "6c757d"
+                    thumb = f"https://placehold.co/600x338/{bg}/FFFFFF/png?text={safe_name}+LIVE"
+
+                # Markdownのリンク付き画像構文を使用（HTMLタグを使わないので崩れません）
+                st.markdown(f"**{cam['name']}**")
+                st.markdown(f"[![{cam['name']}]({thumb})]({cam['live_url']})")
+                st.caption("👆 クリックして映像を確認")

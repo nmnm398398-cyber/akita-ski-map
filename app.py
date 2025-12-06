@@ -3,22 +3,24 @@ import folium
 from streamlit_folium import st_folium
 import requests
 import pandas as pd
-from datetime import datetime
 
 # --- 設定 ---
-# データの最終確認日時
-DATA_UPDATED = "2025年12月6日 23:00"
+DATA_UPDATED = "2025年12月6日 23:30"
 
-st.set_page_config(page_title="秋田県近辺スキー場情報 (冬道・飯島起点)", layout="wide")
+st.set_page_config(page_title="秋田県近辺スキー場情報 (飯島起点)", layout="wide")
 
 st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
 st.markdown(f"##### 2025-2026シーズン 状況一覧 (秋田市飯島 起点)")
 
-st.warning("⚠️ **距離と時間について**\n\n表示されている時間は、**冬道の路面状況や混雑を加味した目安（夏場の約1.3倍）**です。天候によりさらに時間がかかる場合がありますので、余裕を持って移動してください。")
+# --- お知らせ欄 ---
+st.warning("""
+**「リアルタイム渋滞情報は反映していません。」**
+\n※表示時間はGoogleマップ標準時間＋35%（冬道想定）で算出しています。
+""")
 
 # --- データの定義 ---
-# distance: 秋田市飯島からのGoogleマップ実走距離(km)
-# time: 冬道を想定した所要時間(分) [Google標準時間 × 1.2~1.3 + アルファ]
+# time: Googleマップ標準所要時間(分) ※ここからプログラムで自動的に+35%されます
+# distance: 秋田市飯島からの距離(km)
 ski_resorts = [
     {
         "name": "夏油高原スキー場", 
@@ -26,7 +28,7 @@ ski_resorts = [
         "snow": "100cm", "snow_yest": "30cm", 
         "status": "全面滑走可", "courses_open": 14, "courses_total": 14, 
         "open_date": "営業中", "url": "https://www.getokogen.com/",
-        "distance": 139, "time": 160, # 2時間40分 (高速利用)
+        "distance": 139, "time": 115, # 標準1時間55分
         "price": 6800, "check_date": "12/6 10:00"
     },
     {
@@ -35,7 +37,7 @@ ski_resorts = [
         "snow": "80cm", "snow_yest": "10cm",
         "status": "一部滑走可", "courses_open": 2, "courses_total": 4, 
         "open_date": "営業中", "url": "https://www.akihachi.jp/",
-        "distance": 105, "time": 150, # 2時間30分 (鹿角経由または285号冬道)
+        "distance": 105, "time": 115, # 標準1時間55分
         "price": 4000, "check_date": "12/6 09:30"
     },
     {
@@ -44,7 +46,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
         "open_date": "12/7予定", "url": "https://www.aniski.jp/",
-        "distance": 79, "time": 110, # 1時間50分 (285号経由)
+        "distance": 79, "time": 85, # 標準1時間25分
         "price": 4500, "check_date": "12/5 18:00"
     },
     {
@@ -53,7 +55,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 13, 
         "open_date": "12/20予定", "url": "https://www.tazawako-ski.com/",
-        "distance": 78, "time": 100, # 1時間40分
+        "distance": 78, "time": 90, # 標準1時間30分
         "price": 5300, "check_date": "12/6 12:00"
     },
     {
@@ -62,7 +64,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
         "open_date": "12/21予定", "url": "http://www.theboon.net/opas/",
-        "distance": 22, "time": 45, # 45分 (仁別方面の雪道考慮)
+        "distance": 22, "time": 30, # 標準30分
         "price": 2200, "check_date": "12/4 15:00"
     },
     {
@@ -71,7 +73,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
         "open_date": "12/27予定", "url": "https://kyowasnow.net/",
-        "distance": 45, "time": 70, # 1時間10分
+        "distance": 45, "time": 50, # 標準50分
         "price": 3300, "check_date": "12/1 10:00"
     },
     {
@@ -80,7 +82,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
         "open_date": "12月上旬", "url": "https://www.alpas.jp/",
-        "distance": 112, "time": 160, # 2時間40分 (285号経由は冬厳しい)
+        "distance": 112, "time": 115, # 標準1時間55分
         "price": 3400, "check_date": "12/5 09:00"
     },
     {
@@ -89,7 +91,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 12, 
         "open_date": "12月中旬", "url": "https://jeunesse-ski.com/",
-        "distance": 110, "time": 140, # 2時間20分 (高速+山道)
+        "distance": 110, "time": 95, # 標準1時間35分
         "price": 4000, "check_date": "12/1 10:00"
     },
     {
@@ -98,7 +100,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 6, 
         "open_date": "12月中旬", "url": "https://www.yashimaski.com/",
-        "distance": 91, "time": 110, # 1時間50分 (日沿道利用)
+        "distance": 91, "time": 85, # 標準1時間25分
         "price": 3000, "check_date": "12/1 10:00"
     },
     {
@@ -107,7 +109,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 4, 
         "open_date": "12月下旬", "url": "https://www.city.shizukuishi.iwate.jp/",
-        "distance": 88, "time": 115, # 1時間55分 (雫石側)
+        "distance": 88, "time": 90, # 標準1時間30分
         "price": 3000, "check_date": "12/1 10:00"
     },
     {
@@ -116,7 +118,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 6, 
         "open_date": "1月上旬", "url": "https://ohdai.omagari-sc.com/",
-        "distance": 65, "time": 80, # 1時間20分
+        "distance": 65, "time": 60, # 標準1時間
         "price": 3100, "check_date": "12/1 10:00"
     },
     {
@@ -125,7 +127,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 2, 
         "open_date": "12月下旬", "url": "https://www.city.yokote.lg.jp/kanko/1004655/1004664/1001402.html",
-        "distance": 95, "time": 120, # 2時間
+        "distance": 95, "time": 85, # 標準1時間25分
         "price": 2700, "check_date": "12/1 10:00"
     },
     {
@@ -134,7 +136,7 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 1, 
         "open_date": "12月下旬", "url": "https://www.city.daisen.lg.jp/docs/2013110300234/",
-        "distance": 60, "time": 75, # 1時間15分
+        "distance": 60, "time": 55, # 標準55分
         "price": 2400, "check_date": "12/1 10:00"
     },
     {
@@ -143,12 +145,12 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 2, 
         "open_date": "12月下旬", "url": "https://www.city-yuzawa.jp/site/inakawaski/",
-        "distance": 105, "time": 130, # 2時間10分
+        "distance": 105, "time": 95, # 標準1時間35分
         "price": 2500, "check_date": "12/1 10:00"
     }
 ]
 
-# --- 関数: 天気API ---
+# --- 天気取得関数 ---
 @st.cache_data(ttl=3600)
 def get_weather_batch():
     results = {}
@@ -179,8 +181,9 @@ def get_weather_batch():
             results[resort["name"]] = {"today": "-", "tmrw": "-"}
     return results
 
-# --- 表示用ヘルパー ---
+# --- 時間表示用ヘルパー ---
 def format_time(minutes):
+    """分を「X時間Y分」に変換"""
     h = minutes // 60
     m = minutes % 60
     if h > 0:
@@ -196,6 +199,10 @@ df_list = []
 for resort in ski_resorts:
     w = weather_data.get(resort["name"], {"today": "-", "tmrw": "-"})
     
+    # 時間計算: 標準時間 × 1.35 (+35%)
+    time_winter = int(resort["time"] * 1.35)
+
+    # コース表記
     if resort["status"] == "OPEN前":
         course_disp = "-"
     else:
@@ -208,7 +215,7 @@ for resort in ski_resorts:
         "オープンコース数": course_disp,
         "リフト券": f"¥{resort['price']:,}", 
         "天気(今/明)": f"{w['today']} → {w['tmrw']}",
-        "飯島から": f"{resort['distance']}km ({format_time(resort['time'])})",
+        "飯島から": f"{resort['distance']}km ({format_time(time_winter)})", # 計算後の時間を表示
         "予定": resort["open_date"],
         "情報確認日": resort["check_date"],
         "リンク": resort["url"],
@@ -221,7 +228,6 @@ df = pd.DataFrame(df_list)
 
 # --- 1. 一覧テーブル ---
 st.subheader("📋 リアルタイム状況一覧")
-st.info(f"📅 **情報確認日時: {DATA_UPDATED}**\n\n※距離と時間は、飯島起点で**冬道を想定した数値（通常+30%程度）**を表示しています。")
 
 st.data_editor(
     df[["スキー場", "積雪", "前日降雪", "オープンコース数", "リフト券", "天気(今/明)", "飯島から", "予定", "情報確認日", "リンク"]],

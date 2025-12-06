@@ -6,8 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 設定 ---
-# 現在時刻(8:10頃)より前の時刻に修正しました
-DATA_UPDATED = "2025年12月7日 08:00"
+DATA_UPDATED = "2025年12月7日 08:15"
 
 st.set_page_config(page_title="秋田県近辺スキー場情報", layout="wide")
 
@@ -249,13 +248,12 @@ for resort in ski_resorts:
     if "オーパス" in short_name:
         short_name = "オーパス"
     else:
-        # "スキー場"を削除、"ファミリースキー場"の場合は"ファミリー"だけ残るように順序考慮
         short_name = short_name.replace("ファミリースキー場", "ファミリー").replace("スキー場", "")
 
     link_html = f'<a href="{resort["url"]}" target="_blank" class="link-btn">公式HP</a>'
 
     df_list.append({
-        "スキー場名": short_name, # 短縮名をセット
+        "スキー場名": short_name,
         "積雪": resort["snow"],
         f"前日降雪<br><span style='font-size:0.8em'>({str_yest})</span>": resort["snow_yest"],
         "コース数<br><span style='font-size:0.8em'>(開/全)</span>": course_disp,
@@ -283,15 +281,39 @@ if count_hit == 0:
 else:
     df = pd.DataFrame(df_list)
 
-    # 1. 一覧テーブル
+    # 1. 一覧テーブル (最上部)
     st.subheader(f"📋 リアルタイム状況一覧 ({count_hit}件)")
     st.info(f"📅 **情報確認日時: {DATA_UPDATED}**")
     
-    # 隠し列を指定してHTML化
     table_html = df.drop(columns=["lat", "lon", "status_raw", "original_name"]).to_html(classes="table", escape=False, index=False)
     st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
 
-    # 2. マップ
+    # 2. ライブカメラ (真ん中)
+    st.divider()
+    st.subheader("📷 ライブカメラ (サムネイルクリックで確認)")
+    st.markdown("クリックすると各スキー場のライブカメラページへ移動します。")
+
+    cols_per_row = 3
+    rows = [camera_data[i:i + cols_per_row] for i in range(0, len(camera_data), cols_per_row)]
+
+    for row in rows:
+        cols = st.columns(cols_per_row)
+        for idx, cam in enumerate(row):
+            with cols[idx]:
+                if cam.get("yt_id"):
+                    thumb = f"https://img.youtube.com/vi/{cam['yt_id']}/mqdefault.jpg"
+                else:
+                    safe_name = cam['name'].replace("スキー場", "").replace(" ", "").replace("ファミリースキー場", "")
+                    if "オーパス" in cam['name']: safe_name = "オーパス"
+                    bg = "008CBA" if "営業中" in cam['open_date'] else "6c757d"
+                    thumb = f"https://placehold.co/600x338/{bg}/FFFFFF/png?text={safe_name}+LIVE"
+
+                st.markdown(f"**{cam['name']}**")
+                st.markdown(f"[![{cam['name']}]({thumb})]({cam['live_url']})")
+                st.caption("👆 クリックして映像を確認")
+
+    # 3. マップ (最下部)
+    st.divider()
     st.subheader("🗺️ マップ")
     m = folium.Map(location=[39.8, 140.5], zoom_start=9)
     for _, row in df.iterrows():
@@ -312,29 +334,3 @@ else:
             icon=folium.Icon(color=icon_color, icon="info-sign")
         ).add_to(m)
     st_folium(m, width="100%", height=600)
-
-    # 3. ライブカメラ
-    st.divider()
-    st.subheader("📷 ライブカメラ (サムネイルクリックで確認)")
-    st.markdown("クリックすると各スキー場のライブカメラページへ移動します。")
-
-    cols_per_row = 3
-    rows = [camera_data[i:i + cols_per_row] for i in range(0, len(camera_data), cols_per_row)]
-
-    for row in rows:
-        cols = st.columns(cols_per_row)
-        for idx, cam in enumerate(row):
-            with cols[idx]:
-                if cam.get("yt_id"):
-                    thumb = f"https://img.youtube.com/vi/{cam['yt_id']}/mqdefault.jpg"
-                else:
-                    # 短縮名をサムネイル生成にも使用
-                    safe_name = cam['name'].replace("スキー場", "").replace(" ", "").replace("ファミリースキー場", "")
-                    if "オーパス" in cam['name']: safe_name = "オーパス"
-                    
-                    bg = "008CBA" if "営業中" in cam['open_date'] else "6c757d"
-                    thumb = f"https://placehold.co/600x338/{bg}/FFFFFF/png?text={safe_name}+LIVE"
-
-                st.markdown(f"**{cam['name']}**")
-                st.markdown(f"[![{cam['name']}]({thumb})]({cam['live_url']})")
-                st.caption("👆 クリックして映像を確認")

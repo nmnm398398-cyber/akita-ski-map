@@ -3,11 +3,6 @@ import folium
 from streamlit_folium import st_folium
 import requests
 import pandas as pd
-from datetime import datetime
-
-# --- 設定: 情報収集日時 ---
-# ※積雪・コース・営業状況などのデータを更新したら、ここも書き換えてください
-DATA_UPDATED = "2025年12月6日 22:30"
 
 # ページ設定
 st.set_page_config(page_title="秋田県近辺スキー場情報 (飯島起点)", layout="wide")
@@ -15,13 +10,10 @@ st.set_page_config(page_title="秋田県近辺スキー場情報 (飯島起点)"
 st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
 st.markdown(f"##### 2025-2026シーズン 状況一覧 (秋田市飯島 起点)")
 
-# 更新日時の表示
-st.info(f"📅 **情報収集日時: {DATA_UPDATED}** 時点\n\n※積雪・コース数・営業状況はこの日時のものです。天気予報はアクセス時にリアルタイムで取得しています。")
+st.info("※各スキー場の公式サイト等で情報を確認した日時を表示しています。")
 
 # --- データの定義 ---
-# distance: 秋田市飯島からの片道距離(km)
-# time: 秋田市飯島からの車での標準所要時間(分) ※一般道優先、遠方は高速利用想定
-# price: 大人1日券の標準価格(円)
+# check_date: その情報を公式サイト等で確認した日時
 ski_resorts = [
     # 営業中・または主要スキー場
     {
@@ -30,8 +22,9 @@ ski_resorts = [
         "snow": "100cm", "snow_yest": "30cm", 
         "status": "全面滑走可", "courses_open": 14, "courses_total": 14, 
         "open_date": "営業中", "url": "https://www.getokogen.com/",
-        "distance": 110, "time": 105, # 秋田北IC利用想定
-        "price": 6800
+        "distance": 110, "time": 105, 
+        "price": 6800,
+        "check_date": "12/6 10:00"
     },
     {
         "name": "秋田八幡平スキー場", 
@@ -39,17 +32,9 @@ ski_resorts = [
         "snow": "80cm", "snow_yest": "10cm",
         "status": "一部滑走可", "courses_open": 2, "courses_total": 4, 
         "open_date": "営業中", "url": "https://www.akihachi.jp/",
-        "distance": 95, "time": 110, # 五城目経由
-        "price": 4000
-    },
-    {
-        "name": "太平山スキー場オーパス", 
-        "lat": 39.7894, "lon": 140.1983, 
-        "snow": "-", "snow_yest": "-",
-        "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
-        "open_date": "12/21予定", "url": "http://www.theboon.net/opas/",
-        "distance": 15, "time": 25,
-        "price": 2200
+        "distance": 95, "time": 110,
+        "price": 4000,
+        "check_date": "12/6 09:30"
     },
     {
         "name": "森吉山阿仁スキー場", 
@@ -57,8 +42,9 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
         "open_date": "12/7予定", "url": "https://www.aniski.jp/",
-        "distance": 85, "time": 90, # 五城目経由
-        "price": 4500
+        "distance": 85, "time": 90,
+        "price": 4500,
+        "check_date": "12/5 18:00"
     },
     {
         "name": "たざわ湖スキー場", 
@@ -67,7 +53,18 @@ ski_resorts = [
         "status": "OPEN前", "courses_open": 0, "courses_total": 13, 
         "open_date": "12/20予定", "url": "https://www.tazawako-ski.com/",
         "distance": 75, "time": 85,
-        "price": 5300
+        "price": 5300,
+        "check_date": "12/6 12:00"
+    },
+    {
+        "name": "太平山スキー場オーパス", 
+        "lat": 39.7894, "lon": 140.1983, 
+        "snow": "-", "snow_yest": "-",
+        "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
+        "open_date": "12/21予定", "url": "http://www.theboon.net/opas/",
+        "distance": 15, "time": 25,
+        "price": 2200,
+        "check_date": "12/4 15:00"
     },
     {
         "name": "協和スキー場", 
@@ -76,7 +73,8 @@ ski_resorts = [
         "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
         "open_date": "12/27予定", "url": "https://kyowasnow.net/",
         "distance": 40, "time": 50,
-        "price": 3300
+        "price": 3300,
+        "check_date": "12/1 10:00"
     },
     {
         "name": "花輪スキー場", 
@@ -84,8 +82,9 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 7, 
         "open_date": "12月上旬", "url": "https://www.alpas.jp/",
-        "distance": 100, "time": 110, # 五城目経由
-        "price": 3400
+        "distance": 100, "time": 110,
+        "price": 3400,
+        "check_date": "12/5 09:00"
     },
     {
         "name": "ジュネス栗駒スキー場", 
@@ -93,8 +92,9 @@ ski_resorts = [
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 12, 
         "open_date": "12月中旬", "url": "https://jeunesse-ski.com/",
-        "distance": 110, "time": 110, # 高速利用推奨
-        "price": 4000
+        "distance": 110, "time": 110,
+        "price": 4000,
+        "check_date": "12/1 10:00"
     },
     {
         "name": "鳥海高原矢島スキー場", 
@@ -103,7 +103,8 @@ ski_resorts = [
         "status": "OPEN前", "courses_open": 0, "courses_total": 6, 
         "open_date": "12月中旬", "url": "https://www.yashimaski.com/",
         "distance": 85, "time": 100,
-        "price": 3000
+        "price": 3000,
+        "check_date": "12/1 10:00"
     },
     {
         "name": "水晶山スキー場", 
@@ -112,7 +113,8 @@ ski_resorts = [
         "status": "OPEN前", "courses_open": 0, "courses_total": 4, 
         "open_date": "12月下旬", "url": "https://www.city.shizukuishi.iwate.jp/",
         "distance": 85, "time": 95,
-        "price": 3000
+        "price": 3000,
+        "check_date": "12/1 10:00"
     },
     {
         "name": "大台スキー場", 
@@ -121,7 +123,8 @@ ski_resorts = [
         "status": "OPEN前", "courses_open": 0, "courses_total": 6, 
         "open_date": "1月上旬", "url": "https://ohdai.omagari-sc.com/",
         "distance": 60, "time": 70,
-        "price": 3100
+        "price": 3100,
+        "check_date": "12/1 10:00"
     },
     {
         "name": "天下森スキー場", 
@@ -130,7 +133,8 @@ ski_resorts = [
         "status": "OPEN前", "courses_open": 0, "courses_total": 2, 
         "open_date": "12月下旬", "url": "https://www.city.yokote.lg.jp/kanko/1004655/1004664/1001402.html",
         "distance": 90, "time": 100,
-        "price": 2700
+        "price": 2700,
+        "check_date": "12/1 10:00"
     },
     {
         "name": "大曲ファミリースキー場", 
@@ -139,7 +143,8 @@ ski_resorts = [
         "status": "OPEN前", "courses_open": 0, "courses_total": 1, 
         "open_date": "12月下旬", "url": "https://www.city.daisen.lg.jp/docs/2013110300234/",
         "distance": 55, "time": 60,
-        "price": 2400
+        "price": 2400,
+        "check_date": "12/1 10:00"
     },
     {
         "name": "稲川スキー場", 
@@ -148,7 +153,8 @@ ski_resorts = [
         "status": "OPEN前", "courses_open": 0, "courses_total": 2, 
         "open_date": "12月下旬", "url": "https://www.city-yuzawa.jp/site/inakawaski/",
         "distance": 100, "time": 110,
-        "price": 2500
+        "price": 2500,
+        "check_date": "12/1 10:00"
     }
 ]
 
@@ -211,10 +217,11 @@ for resort in ski_resorts:
         "積雪": resort["snow"],
         "前日降雪": resort["snow_yest"],
         "オープンコース数": course_disp,
-        "リフト券": f"¥{resort['price']:,}", # キー変更
+        "リフト券": f"¥{resort['price']:,}", 
         "天気(今/明)": f"{w['today']} → {w['tmrw']}",
         "飯島から": f"{resort['distance']}km ({format_time(resort['time'])})",
         "予定": resort["open_date"],
+        "情報確認日": resort["check_date"], # ここに追加
         "リンク": resort["url"],
         "lat": resort["lat"],
         "lon": resort["lon"],
@@ -227,16 +234,17 @@ df = pd.DataFrame(df_list)
 st.subheader("📋 リアルタイム状況一覧")
 
 st.data_editor(
-    df[["スキー場", "積雪", "前日降雪", "オープンコース数", "リフト券", "天気(今/明)", "飯島から", "予定", "リンク"]],
+    df[["スキー場", "積雪", "前日降雪", "オープンコース数", "リフト券", "天気(今/明)", "飯島から", "予定", "情報確認日", "リンク"]],
     column_config={
         "リンク": st.column_config.LinkColumn("公式サイト", display_text="🔗 HPへ"),
         "スキー場": st.column_config.TextColumn("スキー場", width="medium"),
         "積雪": st.column_config.TextColumn("積雪", width="small"),
         "前日降雪": st.column_config.TextColumn("前日降雪", width="small"),
         "オープンコース数": st.column_config.TextColumn("コース数(開/全)", width="medium"),
-        "リフト券": st.column_config.TextColumn("リフト券 (大人1日)", width="small"), # 表示名変更
+        "リフト券": st.column_config.TextColumn("リフト券 (大人1日)", width="small"),
         "飯島から": st.column_config.TextColumn("飯島からの距離/時間", width="medium"),
         "予定": st.column_config.TextColumn("オープン", width="small"),
+        "情報確認日": st.column_config.TextColumn("情報確認日", width="small"), # 表示設定
     },
     hide_index=True,
     disabled=True,
@@ -259,7 +267,10 @@ for _, row in df.iterrows():
         <b>コース:</b> {row['オープンコース数']}<br>
         <b>リフト券:</b> {row['リフト券']}<br>
         <b>距離:</b> {row['飯島から']}<br>
-        <div style="margin-top:8px;">
+        <div style="font-size:0.8em; color:#666; margin-top:5px; text-align:right;">
+            情報確認: {row['情報確認日']}
+        </div>
+        <div style="margin-top:5px;">
             <a href="{row['リンク']}" target="_blank" style="background:#008CBA; color:white; padding:4px 8px; text-decoration:none; border-radius:3px; font-size:0.9em;">公式サイトを見る</a>
         </div>
     </div>

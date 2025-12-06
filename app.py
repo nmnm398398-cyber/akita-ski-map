@@ -6,7 +6,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 設定 ---
-DATA_UPDATED = "2025年12月7日 09:00"
+# 現在時刻(8:10頃)より前の時刻に修正しました
+DATA_UPDATED = "2025年12月7日 08:00"
 
 st.set_page_config(page_title="秋田県近辺スキー場情報", layout="wide")
 
@@ -53,15 +54,13 @@ st.sidebar.header("🔍 絞り込み検索")
 filter_open_only = st.sidebar.checkbox("今シーズン営業中のみを表示", value=False)
 
 # --- データ定義 ---
-# groomed: 圧雪コース数
-# ungroomed: 非圧雪コース数
 ski_resorts = [
     {
         "name": "夏油高原スキー場", 
         "lat": 39.2178, "lon": 140.9242, 
         "snow": "100cm", "snow_yest": "30cm", 
         "status": "全面滑走可", "courses_open": 14, "courses_total": 14, 
-        "groomed": 10, "ungroomed": 4, # 夏油は非圧雪エリアが多い
+        "groomed": 10, "ungroomed": 4,
         "open_date": "営業中", "url": "https://www.getokogen.com/",
         "distance": 139, "time": 115, 
         "price": 6800, "check_date": "12/6 10:00",
@@ -84,7 +83,7 @@ ski_resorts = [
         "lat": 39.9575, "lon": 140.4564, 
         "snow": "-", "snow_yest": "-",
         "status": "OPEN前", "courses_open": 0, "courses_total": 5, 
-        "groomed": 3, "ungroomed": 2, # 阿仁はバックカントリー的要素が強い
+        "groomed": 3, "ungroomed": 2,
         "open_date": "12/7予定", "url": "https://www.aniski.jp/",
         "distance": 79, "time": 85, 
         "price": 4500, "check_date": "12/5 18:00",
@@ -166,7 +165,7 @@ ski_resorts = [
         "open_date": "12月下旬", "url": "https://www.city.yokote.lg.jp/kanko/1004655/1004664/1001402.html", "distance": 95, "time": 85, "price": 2700, "check_date": "12/1 10:00"
     },
     {
-        "name": "大曲ファミリー", "lat": 39.4283, "lon": 140.5231, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 1, 
+        "name": "大曲ファミリースキー場", "lat": 39.4283, "lon": 140.5231, "snow": "-", "snow_yest": "-", "status": "OPEN前", "courses_open": 0, "courses_total": 1, 
         "groomed": 1, "ungroomed": 0,
         "open_date": "12月下旬", "url": "https://www.city.daisen.lg.jp/docs/2013110300234/", "distance": 60, "time": 55, "price": 2400, "check_date": "12/1 10:00"
     },
@@ -237,29 +236,37 @@ for resort in ski_resorts:
     if "営業中" in open_txt:
         open_txt = "✅ オープン済み"
 
+    # コンディション
     if resort["status"] == "OPEN前":
         course_disp = "-"
         condition_disp = "-"
     else:
         course_disp = f"{resort['courses_open']} / {resort['courses_total']}"
-        # コンディション情報（圧雪/非圧雪）
         condition_disp = f"{resort['groomed']} / {resort['ungroomed']}"
     
+    # 名称短縮ロジック
+    short_name = resort["name"]
+    if "オーパス" in short_name:
+        short_name = "オーパス"
+    else:
+        # "スキー場"を削除、"ファミリースキー場"の場合は"ファミリー"だけ残るように順序考慮
+        short_name = short_name.replace("ファミリースキー場", "ファミリー").replace("スキー場", "")
+
     link_html = f'<a href="{resort["url"]}" target="_blank" class="link-btn">公式HP</a>'
 
     df_list.append({
-        "スキー場名": resort["name"],
+        "スキー場名": short_name, # 短縮名をセット
         "積雪": resort["snow"],
         f"前日降雪<br><span style='font-size:0.8em'>({str_yest})</span>": resort["snow_yest"],
         "コース数<br><span style='font-size:0.8em'>(開/全)</span>": course_disp,
-        "コース内訳<br><span style='font-size:0.8em'>(圧雪/非圧雪)</span>": condition_disp, # 新規追加列
+        "コース内訳<br><span style='font-size:0.8em'>(圧雪/非圧雪)</span>": condition_disp,
         "リフト券<br><span style='font-size:0.8em'>(大人1日)</span>": f"¥{resort['price']:,}",
         f"天気<br><span style='font-size:0.8em'>({str_today}→{str_tmrw})</span>": f"{w['today']} → {w['tmrw']}",
         "飯島から<br><span style='font-size:0.8em'>(距離/時間)</span>": f"{resort['distance']}km<br>{format_time(time_winter)}",
         "オープン予定": open_txt,
         "情報確認": resort["check_date"],
         "リンク": link_html,
-        "lat": resort["lat"], "lon": resort["lon"], "status_raw": resort["status"]
+        "lat": resort["lat"], "lon": resort["lon"], "status_raw": resort["status"], "original_name": resort["name"]
     })
 
     if resort.get("live_url"):
@@ -280,7 +287,8 @@ else:
     st.subheader(f"📋 リアルタイム状況一覧 ({count_hit}件)")
     st.info(f"📅 **情報確認日時: {DATA_UPDATED}**")
     
-    table_html = df.drop(columns=["lat", "lon", "status_raw"]).to_html(classes="table", escape=False, index=False)
+    # 隠し列を指定してHTML化
+    table_html = df.drop(columns=["lat", "lon", "status_raw", "original_name"]).to_html(classes="table", escape=False, index=False)
     st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
 
     # 2. マップ
@@ -290,7 +298,7 @@ else:
         icon_color = "red" if "オープン済み" in row['オープン予定'] else "blue"
         html = f"""
         <div style="font-family:sans-serif; width:220px;">
-            <h5 style="margin:0 0 5px 0;">{row['スキー場名']}</h5>
+            <h5 style="margin:0 0 5px 0;">{row['original_name']}</h5>
             <hr style="margin:5px 0;">
             <b>積雪:</b> {row['積雪']}<br>
             <b>距離:</b> {row[f"飯島から<br><span style='font-size:0.8em'>(距離/時間)</span>"].replace('<br>', ' ')}<br>
@@ -300,12 +308,12 @@ else:
         folium.Marker(
             location=[row['lat'], row['lon']],
             popup=folium.Popup(html, max_width=260),
-            tooltip=f"{row['スキー場名']}",
+            tooltip=f"{row['original_name']}",
             icon=folium.Icon(color=icon_color, icon="info-sign")
         ).add_to(m)
     st_folium(m, width="100%", height=600)
 
-    # 3. ライブカメラ (サムネイルクリック式)
+    # 3. ライブカメラ
     st.divider()
     st.subheader("📷 ライブカメラ (サムネイルクリックで確認)")
     st.markdown("クリックすると各スキー場のライブカメラページへ移動します。")
@@ -320,7 +328,10 @@ else:
                 if cam.get("yt_id"):
                     thumb = f"https://img.youtube.com/vi/{cam['yt_id']}/mqdefault.jpg"
                 else:
-                    safe_name = cam['name'].replace("スキー場", "").replace(" ", "")
+                    # 短縮名をサムネイル生成にも使用
+                    safe_name = cam['name'].replace("スキー場", "").replace(" ", "").replace("ファミリースキー場", "")
+                    if "オーパス" in cam['name']: safe_name = "オーパス"
+                    
                     bg = "008CBA" if "営業中" in cam['open_date'] else "6c757d"
                     thumb = f"https://placehold.co/600x338/{bg}/FFFFFF/png?text={safe_name}+LIVE"
 

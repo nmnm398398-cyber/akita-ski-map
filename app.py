@@ -35,23 +35,27 @@ st.markdown("""
     .status-ng { color: #d9534f; font-weight: bold; background:#fff5f5; padding:2px 5px; border-radius:4px; }
     .no-data { color: #999; font-size: 0.9em; }
     .link-btn { background: #fff; border: 1px solid #008CBA; color: #008CBA; padding: 2px 8px; border-radius: 4px; text-decoration: none; font-size: 0.8em;}
-    
-    /* 更新バッジ */
     .update-info { background:#fff3cd; padding:10px; border-radius:5px; margin-bottom:15px; font-size:0.9em; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
-st.markdown(f"##### ハイブリッド版 (自動取得 + 詳細スペック)")
+st.markdown(f"##### 自動スクレイピング強化版")
 
 # --- サイドバー ---
-filter_open_only = st.sidebar.checkbox("営業中と判定された場所のみ表示", value=False)
+filter_open_only = st.sidebar.checkbox("営業中のみ表示", value=False)
 
 # --- スクレイピング関数 ---
 @st.cache_data(ttl=CACHE_TTL)
-def scrape_resort(url):
-    """サイトから積雪と状況を抽出"""
-    data = {"snow": "未取得", "status": "確認中", "new_snow": "-"}
+def scrape_resort(url, total_courses):
+    """
+    サイトから積雪、状況、そして「オープンしているコース数」を抽出する
+    """
+    data = {
+        "snow": "未取得", 
+        "status": "確認中", 
+        "open_count": "?" # オープンコース数
+    }
     headers = {"User-Agent": "Mozilla/5.0"}
     
     try:
@@ -65,23 +69,35 @@ def scrape_resort(url):
             match = re.search(r'(積雪|山頂)[:：]*([0-9]{1,3})cm', text)
             if match: data["snow"] = f"{match.group(2)}cm"
             
-            # 2. 新雪/前日 (簡易取得)
-            match_new = re.search(r'(新雪|降雪)[:：]*([0-9]{1,3})cm', text)
-            if match_new: data["new_snow"] = f"{match_new.group(2)}cm"
-
-            # 3. 状況
-            if "全面滑走可" in text: data["status"] = "✅ 全面可"
-            elif "一部滑走可" in text: data["status"] = "⚠️ 一部可"
-            elif "営業中" in text: data["status"] = "✅ 営業中"
-            elif "準備中" in text: data["status"] = "⛔ 準備中"
-            elif "クローズ" in text or "終了" in text: data["status"] = "⛔ クローズ"
+            # 2. 状況判定
+            if "全面滑走可" in text: 
+                data["status"] = "✅ 全面可"
+                data["open_count"] = total_courses # 全面可なら全コースオープン
+            elif "一部滑走" in text: 
+                data["status"] = "⚠️ 一部可"
+                # 「Xコース滑走可」のような記述を探す
+                match_c = re.search(r'([0-9]{1,2})([本|コース])(滑走|オープン|可)', text)
+                if match_c:
+                    data["open_count"] = int(match_c.group(1))
+            elif "営業中" in text: 
+                data["status"] = "✅ 営業中"
+                # 明記がない場合は不明だが、営業中なら仮に「?」か、一部記述を探す
+                match_c = re.search(r'([0-9]{1,2})([本|コース])(滑走|オープン|可)', text)
+                if match_c:
+                    data["open_count"] = int(match_c.group(1))
+            elif "準備中" in text: 
+                data["status"] = "⛔ 準備中"
+                data["open_count"] = 0
+            elif "クローズ" in text or "終了" in text: 
+                data["status"] = "⛔ クローズ"
+                data["open_count"] = 0
             
     except:
         pass
     return data
 
 # --- データ定義 (スペック固定データ) ---
-# ※ここに「コース数」や「圧雪/非圧雪」などの変わらない情報を定義します
+# ※「圧雪/非圧雪」の内訳や「全コース数」は物理的な施設情報のため固定値として持ちます
 base_resorts = [
     {
         "name": "夏油高原", "full_name": "夏油高原スキー場", "url": "https://www.getokogen.com/", 
@@ -186,7 +202,8 @@ def fmt_time(m):
 st.markdown(f"""
 <div class="update-info">
     <b>🔄 更新状況 ({ACCESS_TIME})</b><br>
-    積雪と営業状況はリアルタイムでサイトから取得しています。コース数や料金は固定データです。
+    積雪・オープンコース数・営業状況はリアルタイムでサイトから取得しています。<br>
+    <span style="font-size:0.8em">※「オープン数」はサイト内に「全面」や「5コース」等の記述がある場合のみ自動反映されます。</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -205,8 +222,8 @@ total = len(base_resorts)
 for i, r in enumerate(base_resorts):
     progress_bar.progress(10 + int((i/total)*90), text=f"{r['name']} 解析中...")
     
-    # スクレイピング
-    scraped = scrape_resort(r['url'])
+    # スクレイピング (全コース数を渡して、全面可ならそれを採用するロジック)
+    scraped = scrape_resort(r['url'], r['total'])
     
     is_open = "営業" in scraped["status"] or "可" in scraped["status"]
     if filter_open_only and not is_open:
@@ -224,19 +241,21 @@ for i, r in enumerate(base_resorts):
     snow_val = scraped['snow']
     if snow_val == "未取得": snow_val = '<span class="no-data">-</span>'
     else: snow_val = f"<b>{snow_val}</b>"
+
+    # コース数表示 (オープン数 / 全数)
+    open_val = scraped['open_count']
+    if open_val == "?": open_val = '<span class="no-data">?</span>'
     
-    new_snow_val = scraped['new_snow']
-    if new_snow_val == "-": new_snow_val = '<span class="no-data">-</span>'
+    course_disp = f"<b>{open_val}</b> / {r['total']}"
 
     df_list.append({
         "スキー場": r["name"],
         "積雪": snow_val,
-        "新雪/前日": new_snow_val, # スクレイピング試行
-        "状況": status_html, # スクレイピング
-        "コース(全)": f"{r['total']}本", # 固定
-        "内訳(圧/非)": f"{r['groom']} / {r['ungroom']}", # 固定
-        "リフト券": f"¥{r['price']:,}", # 固定
-        f"天気({today_str})": w['t'], # API
+        "状況": status_html,
+        "コース数<br><span style='font-size:0.8em'>(開/全)</span>": course_disp,
+        "内訳<br><span style='font-size:0.8em'>(圧雪/非圧雪)</span>": f"{r['groom']} / {r['ungroom']}",
+        "リフト券": f"¥{r['price']:,}",
+        f"天気({today_str})": w['t'],
         "距離/時間": f"{r['dist']}km/{fmt_time(t_winter)}",
         "リンク": f'<a href="{r["url"]}" target="_blank" class="link-btn">公式HP</a>',
         "lat": r["lat"], "lon": r["lon"], "raw_status": scraped['status'], "full_name": r["full_name"]

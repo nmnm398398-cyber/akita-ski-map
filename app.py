@@ -3,15 +3,20 @@ import folium
 from streamlit_folium import st_folium
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-# --- 設定 ---
-DATA_UPDATED = "2025年12月7日 08:15"
-
+# --- ページ設定 ---
 st.set_page_config(page_title="秋田県近辺スキー場情報", layout="wide")
 
-# --- 日付計算 ---
-today = datetime.now()
+# --- 現在時刻の自動取得 (日本時間 JST) ---
+JST = timezone(timedelta(hours=9), 'JST')
+now_jst = datetime.now(timezone.utc).astimezone(JST)
+
+# 表示用の文字列を作成 (例: 2025年12月07日 12:34)
+DATA_UPDATED = now_jst.strftime("%Y年%m月%d日 %H:%M")
+
+# 日付計算（天気予報用）
+today = now_jst
 yesterday = today - timedelta(days=1)
 tomorrow = today + timedelta(days=1)
 str_today = today.strftime("%m/%d")
@@ -53,6 +58,7 @@ st.sidebar.header("🔍 絞り込み検索")
 filter_open_only = st.sidebar.checkbox("今シーズン営業中のみを表示", value=False)
 
 # --- データ定義 ---
+# ※【重要】積雪データ等は手動更新が必要です。自動更新されるのは「天気」と「ヘッダーの日時」です。
 ski_resorts = [
     {
         "name": "夏油高原スキー場", 
@@ -243,7 +249,7 @@ for resort in ski_resorts:
         course_disp = f"{resort['courses_open']} / {resort['courses_total']}"
         condition_disp = f"{resort['groomed']} / {resort['ungroomed']}"
     
-    # 名称短縮ロジック
+    # 名称短縮
     short_name = resort["name"]
     if "オーパス" in short_name:
         short_name = "オーパス"
@@ -281,14 +287,15 @@ if count_hit == 0:
 else:
     df = pd.DataFrame(df_list)
 
-    # 1. 一覧テーブル (最上部)
+    # 1. 一覧テーブル
     st.subheader(f"📋 リアルタイム状況一覧 ({count_hit}件)")
+    # ここで自動取得した現在時刻を表示
     st.info(f"📅 **情報確認日時: {DATA_UPDATED}**")
     
     table_html = df.drop(columns=["lat", "lon", "status_raw", "original_name"]).to_html(classes="table", escape=False, index=False)
     st.markdown(f'<div class="table-container">{table_html}</div>', unsafe_allow_html=True)
 
-    # 2. ライブカメラ (真ん中)
+    # 2. ライブカメラ
     st.divider()
     st.subheader("📷 ライブカメラ (サムネイルクリックで確認)")
     st.markdown("クリックすると各スキー場のライブカメラページへ移動します。")
@@ -312,7 +319,7 @@ else:
                 st.markdown(f"[![{cam['name']}]({thumb})]({cam['live_url']})")
                 st.caption("👆 クリックして映像を確認")
 
-    # 3. マップ (最下部)
+    # 3. マップ
     st.divider()
     st.subheader("🗺️ マップ")
     m = folium.Map(location=[39.8, 140.5], zoom_start=9)

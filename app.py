@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import re
 
 # --- 設定 ---
-CACHE_TTL = 3600 # 1時間キャッシュ
+CACHE_TTL = 1800 # 30分更新（より鮮度を上げるため短縮）
 
 st.set_page_config(page_title="秋田県近辺スキー場情報", layout="wide")
 
@@ -17,12 +17,11 @@ JST = timezone(timedelta(hours=9), 'JST')
 now_jst = datetime.now(timezone.utc).astimezone(JST)
 ACCESS_TIME = now_jst.strftime("%Y年%m月%d日 %H:%M")
 today_str = now_jst.strftime("%m/%d")
-tmrw_str = (now_jst + timedelta(days=1)).strftime("%m/%d")
 
 # --- CSS ---
 st.markdown("""
 <style>
-    .table-container { max-height: 600px; overflow: auto; border: 1px solid #ddd; margin-bottom: 30px; }
+    .table-container { max-height: 700px; overflow: auto; border: 1px solid #ddd; margin-bottom: 30px; }
     table { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; white-space: nowrap; }
     th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #ddd; }
     thead th { position: sticky; top: 0; background-color: #008CBA; color: white; z-index: 2; }
@@ -33,7 +32,7 @@ st.markdown("""
     
     .status-ok { color: green; font-weight: bold; background:#e6fffa; padding:2px 5px; border-radius:4px; }
     .status-ng { color: #d9534f; font-weight: bold; background:#fff5f5; padding:2px 5px; border-radius:4px; }
-    .no-data { color: #999; font-size: 0.9em; }
+    .no-data { color: #aaa; font-style:italic; font-size: 0.9em; }
     .link-btn { background: #fff; border: 1px solid #008CBA; color: #008CBA; padding: 2px 8px; border-radius: 4px; text-decoration: none; font-size: 0.8em;}
     .update-info { background:#fff3cd; padding:10px; border-radius:5px; margin-bottom:15px; font-size:0.9em; }
 </style>
@@ -43,139 +42,167 @@ st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
 st.markdown(f"##### 自動スクレイピング強化版")
 
 # --- サイドバー ---
-filter_open_only = st.sidebar.checkbox("営業中のみ表示", value=False)
+filter_open_only = st.sidebar.checkbox("営業中と判定された場所のみ表示", value=False)
 
-# --- スクレイピング関数 ---
+# --- スクレイピング関数 (強化版) ---
 @st.cache_data(ttl=CACHE_TTL)
 def scrape_resort(url, total_courses):
     """
-    サイトから積雪、状況、そして「オープンしているコース数」を抽出する
+    サイトから積雪、状況、オープンコース数を抽出する
     """
     data = {
         "snow": "未取得", 
         "status": "確認中", 
-        "open_count": "?" # オープンコース数
+        "open_count": "?"
     }
-    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    # ブラウザのふりをするヘッダー (重要)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
+    }
     
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=8) # タイムアウト少し延長
         res.encoding = res.apparent_encoding
+        
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
-            text = soup.get_text().replace('\n', '').replace(' ', '')
             
-            # 1. 積雪
-            match = re.search(r'(積雪|山頂)[:：]*([0-9]{1,3})cm', text)
-            if match: data["snow"] = f"{match.group(2)}cm"
+            # テキスト抽出の工夫: テーブル等の区切りにスペースを入れる
+            text = soup.get_text(separator=' ', strip=True)
+            # 全角数字を半角に変換するなど正規化するとヒット率が上がるが今回は簡易化
             
-            # 2. 状況判定
-            if "全面滑走可" in text: 
+            # --- 1. 積雪の取得 (複数のパターンを試行) ---
+            # パターンA: "積雪 150cm"
+            # パターンB: "積雪: 150 cm"
+            # パターンC: "山頂 150 cm"
+            snow_patterns = [
+                r'積雪\s*[:：]?\s*(\d{1,3})\s*cm',
+                r'山頂\s*[:：]?\s*(\d{1,3})\s*cm',
+                r'積雪量\s*[:：]?\s*(\d{1,3})\s*cm'
+            ]
+            
+            for pattern in snow_patterns:
+                match = re.search(pattern, text)
+                if match:
+                    data["snow"] = f"{match.group(1)}cm"
+                    break # 最初に見つかったものを採用
+            
+            # --- 2. 状況判定 ---
+            if "全面滑走可" in text or "全面可" in text: 
                 data["status"] = "✅ 全面可"
-                data["open_count"] = total_courses # 全面可なら全コースオープン
-            elif "一部滑走" in text: 
+                data["open_count"] = total_courses
+            elif "一部滑走" in text or "一部可" in text: 
                 data["status"] = "⚠️ 一部可"
-                # 「Xコース滑走可」のような記述を探す
-                match_c = re.search(r'([0-9]{1,2})([本|コース])(滑走|オープン|可)', text)
-                if match_c:
-                    data["open_count"] = int(match_c.group(1))
+                # 数字を探す
+                match_c = re.search(r'(\d{1,2})\s*(コース|本).*?(滑走|オープン|可)', text)
+                if match_c: data["open_count"] = int(match_c.group(1))
             elif "営業中" in text: 
                 data["status"] = "✅ 営業中"
-                # 明記がない場合は不明だが、営業中なら仮に「?」か、一部記述を探す
-                match_c = re.search(r'([0-9]{1,2})([本|コース])(滑走|オープン|可)', text)
-                if match_c:
-                    data["open_count"] = int(match_c.group(1))
+                # 「全面」の文字がなければ一部の可能性もあるが、一旦営業中とする
             elif "準備中" in text: 
                 data["status"] = "⛔ 準備中"
                 data["open_count"] = 0
             elif "クローズ" in text or "終了" in text: 
                 data["status"] = "⛔ クローズ"
                 data["open_count"] = 0
+            elif "運休" in text:
+                data["status"] = "⛔ 運休"
+                data["open_count"] = 0
             
-    except:
+    except Exception as e:
+        # エラー時は「未取得」のまま
         pass
+        
     return data
 
 # --- データ定義 (スペック固定データ) ---
-# ※「圧雪/非圧雪」の内訳や「全コース数」は物理的な施設情報のため固定値として持ちます
+# open_date_str: オープン予定日（または実績日）
 base_resorts = [
     {
         "name": "夏油高原", "full_name": "夏油高原スキー場", "url": "https://www.getokogen.com/", 
         "lat": 39.2178, "lon": 140.9242, "time": 115, "dist": 139, "price": 6800,
-        "total": 14, "groom": 10, "ungroom": 4, 
+        "total": 14, "groom": 10, "ungroom": 4, "open_date_str": "営業中",
         "yt_id": "Vo9xtIyktUY", "live": "https://www.youtube.com/@getokogen/live"
     },
     {
         "name": "秋田八幡平", "full_name": "秋田八幡平スキー場", "url": "https://www.akihachi.jp/", 
         "lat": 39.9922, "lon": 140.8358, "time": 115, "dist": 105, "price": 4000,
-        "total": 4, "groom": 2, "ungroom": 2, 
+        "total": 4, "groom": 2, "ungroom": 2, "open_date_str": "営業中",
         "live": "https://www.akihachi.jp/"
     },
     {
         "name": "阿仁", "full_name": "森吉山阿仁スキー場", "url": "https://www.aniski.jp/", 
         "lat": 39.9575, "lon": 140.4564, "time": 85, "dist": 79, "price": 4500,
-        "total": 5, "groom": 3, "ungroom": 2, 
+        "total": 5, "groom": 3, "ungroom": 2, "open_date_str": "12/7予定",
         "live": "https://www.aniski.jp/livecam/"
     },
     {
         "name": "たざわ湖", "full_name": "たざわ湖スキー場", "url": "https://www.tazawako-ski.com/", 
         "lat": 39.7567, "lon": 140.7811, "time": 90, "dist": 78, "price": 5300,
-        "total": 13, "groom": 9, "ungroom": 4, 
+        "total": 13, "groom": 9, "ungroom": 4, "open_date_str": "12/20予定",
         "live": "http://www.tazawako-ski.com/gelande/"
+    },
+    {
+        "name": "雫石", "full_name": "雫石スキー場", "url": "https://www.princehotels.co.jp/ski/shizukuishi/", 
+        "lat": 39.6953, "lon": 140.9736, "time": 100, "dist": 90, "price": 6200,
+        "total": 11, "groom": 9, "ungroom": 2, "open_date_str": "12/14予定",
+        "live": "https://www.princehotels.co.jp/ski/shizukuishi/" # カメラはないことが多い
     },
     {
         "name": "オーパス", "full_name": "太平山スキー場オーパス", "url": "http://www.theboon.net/opas/", 
         "lat": 39.7894, "lon": 140.1983, "time": 30, "dist": 22, "price": 2200,
-        "total": 5, "groom": 5, "ungroom": 0, 
+        "total": 5, "groom": 5, "ungroom": 0, "open_date_str": "12/21予定",
         "live": "http://www.theboon.net/opas/livecam.html"
     },
     {
         "name": "ジュネス栗駒", "full_name": "ジュネス栗駒スキー場", "url": "https://jeunesse-ski.com/", 
         "lat": 39.1950, "lon": 140.6922, "time": 95, "dist": 110, "price": 4000,
-        "total": 12, "groom": 10, "ungroom": 2, 
+        "total": 12, "groom": 10, "ungroom": 2, "open_date_str": "12月中旬",
         "live": "https://jeunesse-ski.com/live-camera/"
     },
     {
         "name": "矢島", "full_name": "鳥海高原矢島スキー場", "url": "https://www.yashimaski.com/", 
         "lat": 39.1866, "lon": 140.1264, "time": 85, "dist": 91, "price": 3000,
-        "total": 6, "groom": 5, "ungroom": 1, 
+        "total": 6, "groom": 5, "ungroom": 1, "open_date_str": "12月中旬",
         "live": "https://ski.city.yurihonjo.lg.jp/live-camera/"
     },
     {
         "name": "協和", "full_name": "協和スキー場", "url": "https://kyowasnow.net/", 
         "lat": 39.6384, "lon": 140.3230, "time": 50, "dist": 45, "price": 3300,
-        "total": 7, "groom": 7, "ungroom": 0, 
+        "total": 7, "groom": 7, "ungroom": 0, "open_date_str": "12/27予定",
         "live": "https://kyowasnow.net/"
     },
     {
         "name": "花輪", "full_name": "花輪スキー場", "url": "https://www.alpas.jp/", 
         "lat": 40.1833, "lon": 140.7871, "time": 115, "dist": 112, "price": 3400,
-        "total": 7, "groom": 7, "ungroom": 0, 
+        "total": 7, "groom": 7, "ungroom": 0, "open_date_str": "12月上旬",
     },
     {
         "name": "水晶山", "full_name": "水晶山スキー場", "url": "https://www.city.shizukuishi.iwate.jp/", 
         "lat": 39.7344, "lon": 140.6275, "time": 90, "dist": 88, "price": 3000,
-        "total": 4, "groom": 4, "ungroom": 0, 
+        "total": 4, "groom": 4, "ungroom": 0, "open_date_str": "12月下旬",
     },
     {
         "name": "大台", "full_name": "大台スキー場", "url": "https://ohdai.omagari-sc.com/", 
         "lat": 39.4625, "lon": 140.5592, "time": 60, "dist": 65, "price": 3100,
-        "total": 6, "groom": 6, "ungroom": 0, 
+        "total": 6, "groom": 6, "ungroom": 0, "open_date_str": "1月上旬",
     },
     {
         "name": "天下森", "full_name": "天下森スキー場", "url": "https://www.city.yokote.lg.jp/kanko/1004655/1004664/1001402.html", 
         "lat": 39.2775, "lon": 140.5986, "time": 85, "dist": 95, "price": 2700,
-        "total": 2, "groom": 2, "ungroom": 0, 
+        "total": 2, "groom": 2, "ungroom": 0, "open_date_str": "12月下旬",
     },
     {
         "name": "大曲ファミリー", "full_name": "大曲ファミリースキー場", "url": "https://www.city.daisen.lg.jp/docs/2013110300234/", 
         "lat": 39.4283, "lon": 140.5231, "time": 55, "dist": 60, "price": 2400,
-        "total": 1, "groom": 1, "ungroom": 0, 
+        "total": 1, "groom": 1, "ungroom": 0, "open_date_str": "12月下旬",
     },
     {
         "name": "稲川", "full_name": "稲川スキー場", "url": "https://www.city-yuzawa.jp/site/inakawaski/", 
         "lat": 39.0681, "lon": 140.5894, "time": 95, "dist": 105, "price": 2500,
-        "total": 2, "groom": 2, "ungroom": 0, 
+        "total": 2, "groom": 2, "ungroom": 0, "open_date_str": "12月下旬",
     }
 ]
 
@@ -201,9 +228,9 @@ def fmt_time(m):
 # --- メイン処理 ---
 st.markdown(f"""
 <div class="update-info">
-    <b>🔄 更新状況 ({ACCESS_TIME})</b><br>
-    積雪・オープンコース数・営業状況はリアルタイムでサイトから取得しています。<br>
-    <span style="font-size:0.8em">※「オープン数」はサイト内に「全面」や「5コース」等の記述がある場合のみ自動反映されます。</span>
+    <b>🔄 データ更新状況 ({ACCESS_TIME})</b><br>
+    積雪と営業状況は各公式サイトから自動スクレイピングで取得しています。<br>
+    <span style="font-size:0.8em">※サイトのデザインにより「未取得」となる場合があります。</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -250,6 +277,7 @@ for i, r in enumerate(base_resorts):
 
     df_list.append({
         "スキー場": r["name"],
+        "オープン": r["open_date_str"], # 復活
         "積雪": snow_val,
         "状況": status_html,
         "コース数<br><span style='font-size:0.8em'>(開/全)</span>": course_disp,

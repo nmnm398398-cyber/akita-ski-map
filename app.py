@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import re
 
 # --- 設定 ---
-CACHE_TTL = 1800 # 30分更新（より鮮度を上げるため短縮）
+CACHE_TTL = 1800 # 30分キャッシュ
 
 st.set_page_config(page_title="秋田県近辺スキー場情報", layout="wide")
 
@@ -39,16 +39,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
-st.markdown(f"##### 自動スクレイピング強化版")
+st.markdown(f"##### スクレイピング強化版")
 
 # --- サイドバー ---
 filter_open_only = st.sidebar.checkbox("営業中と判定された場所のみ表示", value=False)
 
-# --- スクレイピング関数 (強化版) ---
+# --- スクレイピング関数 (超強化版) ---
 @st.cache_data(ttl=CACHE_TTL)
 def scrape_resort(url, total_courses):
     """
-    サイトから積雪、状況、オープンコース数を抽出する
+    サイトから積雪、状況、オープンコース数を「柔軟に」抽出する
     """
     data = {
         "snow": "未取得", 
@@ -56,69 +56,72 @@ def scrape_resort(url, total_courses):
         "open_count": "?"
     }
     
-    # ブラウザのふりをするヘッダー (重要)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
+        "Cache-Control": "no-cache"
     }
     
     try:
-        res = requests.get(url, headers=headers, timeout=8) # タイムアウト少し延長
+        res = requests.get(url, headers=headers, timeout=10)
         res.encoding = res.apparent_encoding
         
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             
-            # テキスト抽出の工夫: テーブル等の区切りにスペースを入れる
-            text = soup.get_text(separator=' ', strip=True)
-            # 全角数字を半角に変換するなど正規化するとヒット率が上がるが今回は簡易化
+            # --- テキスト抽出の工夫 ---
+            # 改行やタブをスペースに置換して、一列の文字列にする
+            # これにより「積雪 <br> 100cm」のような構造も「積雪 100cm」として扱える
+            text_body = soup.get_text(separator=' ', strip=True)
             
-            # --- 1. 積雪の取得 (複数のパターンを試行) ---
-            # パターンA: "積雪 150cm"
-            # パターンB: "積雪: 150 cm"
-            # パターンC: "山頂 150 cm"
-            snow_patterns = [
-                r'積雪\s*[:：]?\s*(\d{1,3})\s*cm',
-                r'山頂\s*[:：]?\s*(\d{1,3})\s*cm',
-                r'積雪量\s*[:：]?\s*(\d{1,3})\s*cm'
-            ]
+            # --- 1. 積雪の取得 (ファジー検索) ---
+            # キーワード周辺の数字を探す強力なロジック
+            # 「積雪」「山頂」「Snow」などの後に、最大20文字以内に「数字+cm」があるか探す
             
-            for pattern in snow_patterns:
-                match = re.search(pattern, text)
-                if match:
-                    data["snow"] = f"{match.group(1)}cm"
-                    break # 最初に見つかったものを採用
+            keywords = ["積雪", "山頂", "積雪量", "SNOW DEPTH", "Snow", "現在の積雪"]
+            found_snow = None
             
+            for key in keywords:
+                # キーワードの位置を探す
+                indices = [m.start() for m in re.finditer(key, text_body)]
+                for idx in indices:
+                    # キーワードの後ろ50文字を切り出す
+                    snippet = text_body[idx:idx+50]
+                    # その中に「数字 + (スペース) + cm」があるか
+                    match = re.search(r'(\d{1,3})\s*cm', snippet, re.IGNORECASE)
+                    if match:
+                        val = int(match.group(1))
+                        # 妥当性チェック (0〜500cm以外は誤検知の可能性が高いので無視)
+                        if 0 <= val <= 500:
+                            found_snow = f"{val}cm"
+                            break
+                if found_snow: break
+            
+            if found_snow:
+                data["snow"] = found_snow
+
             # --- 2. 状況判定 ---
-            if "全面滑走可" in text or "全面可" in text: 
+            if "全面滑走可" in text_body or "全面可" in text_body: 
                 data["status"] = "✅ 全面可"
                 data["open_count"] = total_courses
-            elif "一部滑走" in text or "一部可" in text: 
+            elif "一部滑走" in text_body or "一部可" in text_body: 
                 data["status"] = "⚠️ 一部可"
-                # 数字を探す
-                match_c = re.search(r'(\d{1,2})\s*(コース|本).*?(滑走|オープン|可)', text)
+                match_c = re.search(r'(\d{1,2})\s*(コース|本).*?(滑走|オープン|可)', text_body)
                 if match_c: data["open_count"] = int(match_c.group(1))
-            elif "営業中" in text: 
+            elif "営業中" in text_body: 
                 data["status"] = "✅ 営業中"
-                # 「全面」の文字がなければ一部の可能性もあるが、一旦営業中とする
-            elif "準備中" in text: 
+            elif "準備中" in text_body: 
                 data["status"] = "⛔ 準備中"
                 data["open_count"] = 0
-            elif "クローズ" in text or "終了" in text: 
+            elif "クローズ" in text_body or "終了" in text_body: 
                 data["status"] = "⛔ クローズ"
                 data["open_count"] = 0
-            elif "運休" in text:
-                data["status"] = "⛔ 運休"
-                data["open_count"] = 0
             
-    except Exception as e:
-        # エラー時は「未取得」のまま
+    except Exception:
         pass
         
     return data
 
-# --- データ定義 (スペック固定データ) ---
-# open_date_str: オープン予定日（または実績日）
+# --- データ定義 ---
 base_resorts = [
     {
         "name": "夏油高原", "full_name": "夏油高原スキー場", "url": "https://www.getokogen.com/", 
@@ -148,7 +151,7 @@ base_resorts = [
         "name": "雫石", "full_name": "雫石スキー場", "url": "https://www.princehotels.co.jp/ski/shizukuishi/", 
         "lat": 39.6953, "lon": 140.9736, "time": 100, "dist": 90, "price": 6200,
         "total": 11, "groom": 9, "ungroom": 2, "open_date_str": "12/14予定",
-        "live": "https://www.princehotels.co.jp/ski/shizukuishi/" # カメラはないことが多い
+        "live": "https://www.princehotels.co.jp/ski/shizukuishi/"
     },
     {
         "name": "オーパス", "full_name": "太平山スキー場オーパス", "url": "http://www.theboon.net/opas/", 
@@ -229,7 +232,7 @@ def fmt_time(m):
 st.markdown(f"""
 <div class="update-info">
     <b>🔄 データ更新状況 ({ACCESS_TIME})</b><br>
-    積雪と営業状況は各公式サイトから自動スクレイピングで取得しています。<br>
+    積雪と営業状況は各公式サイトから自動スクレイピング(強化版)で取得しています。<br>
     <span style="font-size:0.8em">※サイトのデザインにより「未取得」となる場合があります。</span>
 </div>
 """, unsafe_allow_html=True)
@@ -277,7 +280,7 @@ for i, r in enumerate(base_resorts):
 
     df_list.append({
         "スキー場": r["name"],
-        "オープン": r["open_date_str"], # 復活
+        "オープン": r["open_date_str"],
         "積雪": snow_val,
         "状況": status_html,
         "コース数<br><span style='font-size:0.8em'>(開/全)</span>": course_disp,

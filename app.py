@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import re
 
 # --- 設定 ---
-CACHE_TTL = 1800 # 30分キャッシュ
+CACHE_TTL = 600 # 10分更新 (リアルタイム性を重視して短縮)
 
 st.set_page_config(page_title="秋田県近辺スキー場情報", layout="wide")
 
@@ -32,33 +32,66 @@ st.markdown("""
     
     .status-ok { color: green; font-weight: bold; background:#e6fffa; padding:2px 5px; border-radius:4px; }
     .status-ng { color: #d9534f; font-weight: bold; background:#fff5f5; padding:2px 5px; border-radius:4px; }
+    .status-warn { color: #856404; font-weight: bold; background:#fff3cd; padding:2px 5px; border-radius:4px; }
     .no-data { color: #aaa; font-style:italic; font-size: 0.9em; }
     .link-btn { background: #fff; border: 1px solid #008CBA; color: #008CBA; padding: 2px 8px; border-radius: 4px; text-decoration: none; font-size: 0.8em;}
-    .update-info { background:#fff3cd; padding:10px; border-radius:5px; margin-bottom:15px; font-size:0.9em; }
+    .update-info { background:#d1e7dd; color:#0f5132; padding:10px; border-radius:5px; margin-bottom:15px; font-size:0.9em; border:1px solid #badbcc;}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
-st.markdown(f"##### スクレイピング強化版")
+st.markdown(f"##### 構造解析スクレイピング版")
 
 # --- サイドバー ---
-filter_open_only = st.sidebar.checkbox("営業中と判定された場所のみ表示", value=False)
+filter_open_only = st.sidebar.checkbox("営業中のみ表示", value=False)
 
-# --- スクレイピング関数 (超強化版) ---
+# --- スクレイピング・ヘルパー関数 ---
+def extract_number(text):
+    """テキストから数値(cm)を抽出する強力な正規表現"""
+    if not text: return None
+    # 全角数字を半角に
+    text = text.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+    # "150cm", "150 cm", "150" などを抽出
+    match = re.search(r'(\d{1,3})\s*(cm|㎝)?', text)
+    if match:
+        return match.group(1)
+    return None
+
+def find_snow_in_table(soup):
+    """HTML内の表(table)構造から積雪情報を探す"""
+    # <th>や<td>に「積雪」や「山頂」が含まれるセルを探す
+    targets = soup.find_all(['th', 'td'], string=re.compile(r'積雪|山頂|Snow', re.IGNORECASE))
+    for target in targets:
+        # パターン1: 同じ行の隣のセルにある場合
+        parent = target.find_parent('tr')
+        if parent:
+            cells = parent.find_all(['td', 'th'])
+            for cell in cells:
+                val = extract_number(cell.get_text())
+                if val and cell != target: # 自分自身でなければ
+                    return val
+        
+        # パターン2: 直下の要素にある場合
+        val = extract_number(target.get_text())
+        if val: return val
+    return None
+
+def find_status_in_text(text):
+    """テキスト全体から営業状況を判定"""
+    if "全面滑走可" in text or "全面可" in text: return "✅ 全面可"
+    if "一部滑走" in text or "一部可" in text: return "⚠️ 一部可"
+    if "営業中" in text: return "✅ 営業中"
+    if "準備中" in text: return "⛔ 準備中"
+    if "クローズ" in text or "終了" in text or "運休" in text: return "⛔ クローズ/運休"
+    return "確認中"
+
+# --- メインスクレイピング関数 ---
 @st.cache_data(ttl=CACHE_TTL)
 def scrape_resort(url, total_courses):
-    """
-    サイトから積雪、状況、オープンコース数を「柔軟に」抽出する
-    """
-    data = {
-        "snow": "未取得", 
-        "status": "確認中", 
-        "open_count": "?"
-    }
+    data = {"snow": "未取得", "status": "確認中", "open_count": "?"}
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Cache-Control": "no-cache"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     try:
@@ -67,55 +100,57 @@ def scrape_resort(url, total_courses):
         
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
+            text_body = soup.get_text(separator=' ', strip=True) # 全文テキスト
             
-            # --- テキスト抽出の工夫 ---
-            # 改行やタブをスペースに置換して、一列の文字列にする
-            # これにより「積雪 <br> 100cm」のような構造も「積雪 100cm」として扱える
-            text_body = soup.get_text(separator=' ', strip=True)
+            # --- 1. 積雪情報の取得 (戦略を多重化) ---
             
-            # --- 1. 積雪の取得 (ファジー検索) ---
-            # キーワード周辺の数字を探す強力なロジック
-            # 「積雪」「山頂」「Snow」などの後に、最大20文字以内に「数字+cm」があるか探す
+            # 戦略A: テーブル構造解析 (夏油などはこれで取れる可能性大)
+            snow_val = find_snow_in_table(soup)
             
-            keywords = ["積雪", "山頂", "積雪量", "SNOW DEPTH", "Snow", "現在の積雪"]
-            found_snow = None
+            # 戦略B: リスト構造解析 (dl, dt, dd)
+            if not snow_val:
+                dts = soup.find_all('dt', string=re.compile(r'積雪|山頂'))
+                for dt in dts:
+                    # 対応するddを探す
+                    dd = dt.find_next_sibling('dd')
+                    if dd:
+                        snow_val = extract_number(dd.get_text())
+                        if snow_val: break
             
-            for key in keywords:
-                # キーワードの位置を探す
-                indices = [m.start() for m in re.finditer(key, text_body)]
-                for idx in indices:
-                    # キーワードの後ろ50文字を切り出す
-                    snippet = text_body[idx:idx+50]
-                    # その中に「数字 + (スペース) + cm」があるか
-                    match = re.search(r'(\d{1,3})\s*cm', snippet, re.IGNORECASE)
-                    if match:
-                        val = int(match.group(1))
-                        # 妥当性チェック (0〜500cm以外は誤検知の可能性が高いので無視)
-                        if 0 <= val <= 500:
-                            found_snow = f"{val}cm"
+            # 戦略C: 全文検索 (最終手段)
+            if not snow_val:
+                # 「積雪」のあと20文字以内にある数字を探す
+                keywords = ["積雪", "山頂", "SNOW DEPTH"]
+                for key in keywords:
+                    indices = [m.start() for m in re.finditer(key, text_body)]
+                    for idx in indices:
+                        snippet = text_body[idx:idx+30]
+                        val = extract_number(snippet)
+                        if val: 
+                            snow_val = val
                             break
-                if found_snow: break
-            
-            if found_snow:
-                data["snow"] = found_snow
+                    if snow_val: break
 
-            # --- 2. 状況判定 ---
-            if "全面滑走可" in text_body or "全面可" in text_body: 
-                data["status"] = "✅ 全面可"
-                data["open_count"] = total_courses
-            elif "一部滑走" in text_body or "一部可" in text_body: 
-                data["status"] = "⚠️ 一部可"
-                match_c = re.search(r'(\d{1,2})\s*(コース|本).*?(滑走|オープン|可)', text_body)
-                if match_c: data["open_count"] = int(match_c.group(1))
-            elif "営業中" in text_body: 
-                data["status"] = "✅ 営業中"
-            elif "準備中" in text_body: 
-                data["status"] = "⛔ 準備中"
-                data["open_count"] = 0
-            elif "クローズ" in text_body or "終了" in text_body: 
-                data["status"] = "⛔ クローズ"
-                data["open_count"] = 0
+            if snow_val:
+                data["snow"] = f"{snow_val}cm"
+
+            # --- 2. 営業状況の判定 ---
+            data["status"] = find_status_in_text(text_body)
             
+            # --- 3. コース数 (オープン数) ---
+            if "全面" in data["status"]:
+                data["open_count"] = total_courses
+            elif "クローズ" in data["status"] or "準備中" in data["status"]:
+                data["open_count"] = 0
+            else:
+                # 「5コース滑走可」などを探す
+                match_c = re.search(r'(\d{1,2})\s*(コース|本).*?(滑走|オープン|可)', text_body)
+                if match_c:
+                    data["open_count"] = int(match_c.group(1))
+            
+            # 夏油高原特有の補正: トップページに積雪情報がない場合、天気ページを見に行くロジックも検討すべきだが
+            # 今回はトップページのテーブル解析を最優先にしています。
+
     except Exception:
         pass
         
@@ -126,86 +161,86 @@ base_resorts = [
     {
         "name": "夏油高原", "full_name": "夏油高原スキー場", "url": "https://www.getokogen.com/", 
         "lat": 39.2178, "lon": 140.9242, "time": 115, "dist": 139, "price": 6800,
-        "total": 14, "groom": 10, "ungroom": 4, "open_date_str": "営業中",
+        "total": 14, "groom": 10, "ungroom": 4, 
         "yt_id": "Vo9xtIyktUY", "live": "https://www.youtube.com/@getokogen/live"
     },
     {
         "name": "秋田八幡平", "full_name": "秋田八幡平スキー場", "url": "https://www.akihachi.jp/", 
         "lat": 39.9922, "lon": 140.8358, "time": 115, "dist": 105, "price": 4000,
-        "total": 4, "groom": 2, "ungroom": 2, "open_date_str": "営業中",
+        "total": 4, "groom": 2, "ungroom": 2, 
         "live": "https://www.akihachi.jp/"
     },
     {
         "name": "阿仁", "full_name": "森吉山阿仁スキー場", "url": "https://www.aniski.jp/", 
         "lat": 39.9575, "lon": 140.4564, "time": 85, "dist": 79, "price": 4500,
-        "total": 5, "groom": 3, "ungroom": 2, "open_date_str": "12/7予定",
+        "total": 5, "groom": 3, "ungroom": 2, 
         "live": "https://www.aniski.jp/livecam/"
     },
     {
         "name": "たざわ湖", "full_name": "たざわ湖スキー場", "url": "https://www.tazawako-ski.com/", 
         "lat": 39.7567, "lon": 140.7811, "time": 90, "dist": 78, "price": 5300,
-        "total": 13, "groom": 9, "ungroom": 4, "open_date_str": "12/20予定",
+        "total": 13, "groom": 9, "ungroom": 4, 
         "live": "http://www.tazawako-ski.com/gelande/"
     },
     {
         "name": "雫石", "full_name": "雫石スキー場", "url": "https://www.princehotels.co.jp/ski/shizukuishi/", 
         "lat": 39.6953, "lon": 140.9736, "time": 100, "dist": 90, "price": 6200,
-        "total": 11, "groom": 9, "ungroom": 2, "open_date_str": "12/14予定",
+        "total": 11, "groom": 9, "ungroom": 2, 
         "live": "https://www.princehotels.co.jp/ski/shizukuishi/"
     },
     {
         "name": "オーパス", "full_name": "太平山スキー場オーパス", "url": "http://www.theboon.net/opas/", 
         "lat": 39.7894, "lon": 140.1983, "time": 30, "dist": 22, "price": 2200,
-        "total": 5, "groom": 5, "ungroom": 0, "open_date_str": "12/21予定",
+        "total": 5, "groom": 5, "ungroom": 0, 
         "live": "http://www.theboon.net/opas/livecam.html"
     },
     {
         "name": "ジュネス栗駒", "full_name": "ジュネス栗駒スキー場", "url": "https://jeunesse-ski.com/", 
         "lat": 39.1950, "lon": 140.6922, "time": 95, "dist": 110, "price": 4000,
-        "total": 12, "groom": 10, "ungroom": 2, "open_date_str": "12月中旬",
+        "total": 12, "groom": 10, "ungroom": 2, 
         "live": "https://jeunesse-ski.com/live-camera/"
     },
     {
         "name": "矢島", "full_name": "鳥海高原矢島スキー場", "url": "https://www.yashimaski.com/", 
         "lat": 39.1866, "lon": 140.1264, "time": 85, "dist": 91, "price": 3000,
-        "total": 6, "groom": 5, "ungroom": 1, "open_date_str": "12月中旬",
+        "total": 6, "groom": 5, "ungroom": 1, 
         "live": "https://ski.city.yurihonjo.lg.jp/live-camera/"
     },
     {
         "name": "協和", "full_name": "協和スキー場", "url": "https://kyowasnow.net/", 
         "lat": 39.6384, "lon": 140.3230, "time": 50, "dist": 45, "price": 3300,
-        "total": 7, "groom": 7, "ungroom": 0, "open_date_str": "12/27予定",
+        "total": 7, "groom": 7, "ungroom": 0, 
         "live": "https://kyowasnow.net/"
     },
     {
         "name": "花輪", "full_name": "花輪スキー場", "url": "https://www.alpas.jp/", 
         "lat": 40.1833, "lon": 140.7871, "time": 115, "dist": 112, "price": 3400,
-        "total": 7, "groom": 7, "ungroom": 0, "open_date_str": "12月上旬",
+        "total": 7, "groom": 7, "ungroom": 0, 
     },
     {
         "name": "水晶山", "full_name": "水晶山スキー場", "url": "https://www.city.shizukuishi.iwate.jp/", 
         "lat": 39.7344, "lon": 140.6275, "time": 90, "dist": 88, "price": 3000,
-        "total": 4, "groom": 4, "ungroom": 0, "open_date_str": "12月下旬",
+        "total": 4, "groom": 4, "ungroom": 0, 
     },
     {
         "name": "大台", "full_name": "大台スキー場", "url": "https://ohdai.omagari-sc.com/", 
         "lat": 39.4625, "lon": 140.5592, "time": 60, "dist": 65, "price": 3100,
-        "total": 6, "groom": 6, "ungroom": 0, "open_date_str": "1月上旬",
+        "total": 6, "groom": 6, "ungroom": 0, 
     },
     {
         "name": "天下森", "full_name": "天下森スキー場", "url": "https://www.city.yokote.lg.jp/kanko/1004655/1004664/1001402.html", 
         "lat": 39.2775, "lon": 140.5986, "time": 85, "dist": 95, "price": 2700,
-        "total": 2, "groom": 2, "ungroom": 0, "open_date_str": "12月下旬",
+        "total": 2, "groom": 2, "ungroom": 0, 
     },
     {
         "name": "大曲ファミリー", "full_name": "大曲ファミリースキー場", "url": "https://www.city.daisen.lg.jp/docs/2013110300234/", 
         "lat": 39.4283, "lon": 140.5231, "time": 55, "dist": 60, "price": 2400,
-        "total": 1, "groom": 1, "ungroom": 0, "open_date_str": "12月下旬",
+        "total": 1, "groom": 1, "ungroom": 0, 
     },
     {
         "name": "稲川", "full_name": "稲川スキー場", "url": "https://www.city-yuzawa.jp/site/inakawaski/", 
         "lat": 39.0681, "lon": 140.5894, "time": 95, "dist": 105, "price": 2500,
-        "total": 2, "groom": 2, "ungroom": 0, "open_date_str": "12月下旬",
+        "total": 2, "groom": 2, "ungroom": 0, 
     }
 ]
 
@@ -231,13 +266,13 @@ def fmt_time(m):
 # --- メイン処理 ---
 st.markdown(f"""
 <div class="update-info">
-    <b>🔄 データ更新状況 ({ACCESS_TIME})</b><br>
-    積雪と営業状況は各公式サイトから自動スクレイピング(強化版)で取得しています。<br>
-    <span style="font-size:0.8em">※サイトのデザインにより「未取得」となる場合があります。</span>
+    <b>🔄 スクレイピング実行中 ({ACCESS_TIME})</b><br>
+    現在、各スキー場の公式サイト構造（表・リスト）を解析して積雪データを探索しています。<br>
+    手動データは一切使用していません。
 </div>
 """, unsafe_allow_html=True)
 
-progress_bar = st.progress(0, text="データ取得開始...")
+progress_bar = st.progress(0, text="データ解析開始...")
 
 # 1. 天気
 weather = get_weather()
@@ -250,9 +285,9 @@ count = 0
 total = len(base_resorts)
 
 for i, r in enumerate(base_resorts):
-    progress_bar.progress(10 + int((i/total)*90), text=f"{r['name']} 解析中...")
+    progress_bar.progress(10 + int((i/total)*90), text=f"{r['name']} のサイト構造を解析中...")
     
-    # スクレイピング (全コース数を渡して、全面可ならそれを採用するロジック)
+    # スクレイピング
     scraped = scrape_resort(r['url'], r['total'])
     
     is_open = "営業" in scraped["status"] or "可" in scraped["status"]
@@ -266,6 +301,7 @@ for i, r in enumerate(base_resorts):
     # 表示加工
     status_html = scraped['status']
     if "⛔" in status_html: status_html = f'<span class="status-ng">{status_html}</span>'
+    elif "確認中" in status_html: status_html = f'<span class="no-data">{status_html}</span>'
     else: status_html = f'<span class="status-ok">{status_html}</span>'
     
     snow_val = scraped['snow']
@@ -280,7 +316,6 @@ for i, r in enumerate(base_resorts):
 
     df_list.append({
         "スキー場": r["name"],
-        "オープン": r["open_date_str"],
         "積雪": snow_val,
         "状況": status_html,
         "コース数<br><span style='font-size:0.8em'>(開/全)</span>": course_disp,

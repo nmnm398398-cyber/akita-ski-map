@@ -34,22 +34,21 @@ st.markdown("""
     
     .status-ok { color: green; font-weight: bold; background:#e6fffa; padding:2px 5px; border-radius:4px; }
     .status-ng { color: #d9534f; font-weight: bold; background:#fff5f5; padding:2px 5px; border-radius:4px; }
-    .no-data { color: #999; font-size: 0.9em; font-style: italic; }
-    .err-data { color: #d9534f; font-size: 0.8em; }
+    .status-warn { color: #856404; font-weight: bold; background:#fff3cd; padding:2px 5px; border-radius:4px; }
+    .no-data { color: #aaa; font-style:italic; font-size: 0.9em; }
     .link-btn { background: #fff; border: 1px solid #008CBA; color: #008CBA; padding: 2px 8px; border-radius: 4px; text-decoration: none; font-size: 0.8em;}
     .update-info { background:#d1e7dd; color:#0f5132; padding:10px; border-radius:5px; margin-bottom:15px; font-size:0.9em; border:1px solid #badbcc;}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("⛷️ 秋田県近辺スキー場 リアルタイム情報集約")
-st.markdown(f"##### 構造解析スクレイピング版")
+st.markdown(f"##### 特化型スクレイピング実装版")
 
 # --- サイドバー ---
 filter_open_only = st.sidebar.checkbox("営業中のみ表示", value=False)
 
 # --- スクレイピング・ヘルパー ---
 def get_random_headers():
-    """Bot判定を回避するためのランダムヘッダー"""
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -57,131 +56,145 @@ def get_random_headers():
     ]
     return {
         "User-Agent": random.choice(user_agents),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive"
+        "Cache-Control": "max-age=0",
+        "Upgrade-Insecure-Requests": "1"
     }
 
 def extract_number(text):
-    """文字列から数値(cm)を取り出す"""
     if not text: return None
-    # 全角数字を半角に、不要な空白削除
     text = text.translate(str.maketrans('０１２３４５６７８９', '0123456789')).strip()
-    # 300cm, 300 cm, 300
     match = re.search(r'(\d{1,3})\s*(cm|㎝)?', text, re.IGNORECASE)
     if match:
         val = int(match.group(1))
-        # 0cm〜500cmの範囲なら採用（異常値除外）
-        if 0 <= val <= 500: return val
+        if 0 <= val <= 600: return val
     return None
 
-def find_snow_deep_dive(soup):
-    """
-    HTML構造を潜って積雪を探す（テーブルやリスト対応）
-    """
-    # 1. キーワードを含む要素を全て探す
-    targets = soup.find_all(string=re.compile(r'積雪|山頂|Snow|SNOW', re.IGNORECASE))
-    
-    for target in targets:
-        parent = target.parent
-        if not parent: continue
-        
-        # --- パターンA: 親要素のテキスト自体に数字が含まれている ---
-        # 例: <div>現在の積雪：150cm</div>
-        val = extract_number(parent.get_text())
-        if val: return val
-        
-        # --- パターンB: テーブルの隣のセル (TD -> TD) ---
-        # 例: <th>積雪</th> <td>150cm</td>
-        # 親がtdかthの場合、その親のtrを探す
-        cell = parent.find_parent(['td', 'th'])
-        if cell:
-            row = cell.find_parent('tr')
-            if row:
-                # 行内の全セルを取得
-                cells = row.find_all(['td', 'th'])
-                # 自分より後ろのセルをチェック
-                found_self = False
-                for c in cells:
-                    if c == cell:
-                        found_self = True
-                        continue
-                    if found_self:
-                        val = extract_number(c.get_text())
-                        if val: return val
-
-        # --- パターンC: リスト構造 (DT -> DD) ---
-        # 例: <dt>積雪</dt> <dd>150cm</dd>
-        if parent.name == 'dt':
-            dd = parent.find_next_sibling('dd')
-            if dd:
-                val = extract_number(dd.get_text())
-                if val: return val
-                
-    return None
-
-def determine_status(text):
-    """テキスト全体から営業状況を判定"""
+def find_status_in_text(text):
     if "全面滑走可" in text or "全面可" in text: return "✅ 全面可"
     if "一部滑走" in text or "一部可" in text: return "⚠️ 一部可"
     if "営業中" in text: return "✅ 営業中"
     if "準備中" in text: return "⛔ 準備中"
     if "クローズ" in text or "終了" in text or "運休" in text or "休業" in text: return "⛔ クローズ"
-    return None # 判定不能
+    return None
+
+# --- 個別対応ロジック ---
+def scrape_geto_kogen(soup, text_body):
+    """夏油高原 専用ロジック"""
+    # 夏油はテーブル構造、または特定のクラス名で持っていることが多い
+    # 例: <td class="snow">150cm</td> などを想定
+    
+    snow = None
+    # パターン1: "積雪"のセルを探し、その隣のセルを取得
+    targets = soup.find_all(['th', 'td'], string=re.compile(r'積雪'))
+    for t in targets:
+        sibling = t.find_next_sibling(['td', 'th'])
+        if sibling:
+            val = extract_number(sibling.get_text())
+            if val: 
+                snow = val
+                break
+    
+    # パターン2: テキスト全体から "積雪" の直後の数字を探す (強力な正規表現)
+    if not snow:
+        match = re.search(r'積雪.*?(\d{1,3})\s*cm', text_body, re.DOTALL)
+        if match: snow = int(match.group(1))
+
+    return snow
+
+def scrape_hachimantai(soup, text_body):
+    """秋田八幡平 専用ロジック"""
+    snow = None
+    # 八幡平はトップページの "本日のゲレンデ情報" などの枠内にあることが多い
+    # "積雪" というキーワードの近くを探索
+    
+    # パターン1: dt/dd構造
+    targets = soup.find_all('dt', string=re.compile(r'積雪'))
+    for t in targets:
+        dd = t.find_next_sibling('dd')
+        if dd:
+            val = extract_number(dd.get_text())
+            if val:
+                snow = val
+                break
+                
+    # パターン2: テキスト検索
+    if not snow:
+        match = re.search(r'積雪.*?(\d{1,3})\s*cm', text_body)
+        if match: snow = int(match.group(1))
+        
+    return snow
 
 # --- メインスクレイピング関数 ---
 @st.cache_data(ttl=CACHE_TTL)
-def scrape_resort(url, total_courses):
+def scrape_resort(url, name, total_courses):
     data = {"snow": "未取得", "status": "確認中", "open_count": "?"}
     
     try:
-        # タイムアウトを短めに設定して「待ち」を減らす
-        res = requests.get(url, headers=get_random_headers(), timeout=6)
+        res = requests.get(url, headers=get_random_headers(), timeout=10)
         res.encoding = res.apparent_encoding
         
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
+            text_body = soup.get_text(separator=' ', strip=True)
             
-            # 1. 積雪情報 (構造解析)
-            snow_val = find_snow_deep_dive(soup)
+            # --- 積雪情報の取得 (個別対応 or 汎用) ---
+            snow_val = None
             
-            # 見つからなければ全文検索 (バックアップ)
+            if "夏油" in name:
+                snow_val = scrape_geto_kogen(soup, text_body)
+            elif "八幡平" in name:
+                snow_val = scrape_hachimantai(soup, text_body)
+            
+            # 個別対応で取れなかった、またはその他のスキー場は汎用ロジック
             if not snow_val:
-                text_all = soup.get_text()
-                match = re.search(r'積雪\s*[:：]?\s*(\d{1,3})\s*cm', text_all)
-                if match: snow_val = match.group(1)
+                # 汎用: "積雪"などのキーワード周辺の数字を探す
+                keywords = ["積雪", "山頂", "SNOW DEPTH", "Snow"]
+                for key in keywords:
+                    # キーワードを含む要素を特定
+                    elements = soup.find_all(string=re.compile(key))
+                    for el in elements:
+                        # その要素の親や隣接要素のテキストを含めて数字を探す
+                        parent_text = el.parent.get_text()
+                        val = extract_number(parent_text)
+                        if val:
+                            snow_val = val
+                            break
+                        # 親の親まで遡る（テーブル構造など）
+                        grandparent_text = el.parent.parent.get_text()
+                        val = extract_number(grandparent_text)
+                        if val:
+                            snow_val = val
+                            break
+                    if snow_val: break
 
             if snow_val:
                 data["snow"] = f"{snow_val}cm"
             else:
-                data["snow"] = "記載なし" # サイトは見れたが数値がない
+                data["snow"] = "記載なし"
 
-            # 2. 状況判定
-            text_body = soup.get_text(separator=' ', strip=True)
-            status = determine_status(text_body)
+            # --- 営業状況の判定 ---
+            status = find_status_in_text(text_body)
             if status:
                 data["status"] = status
             else:
-                data["status"] = "不明" # キーワードが見つからない
+                data["status"] = "不明"
 
-            # 3. コース数
+            # --- コース数 ---
             if "全面" in data["status"]:
                 data["open_count"] = total_courses
             elif "クローズ" in data["status"] or "準備" in data["status"]:
                 data["open_count"] = 0
             else:
-                # 「5コース」などの表記を探す
                 match_c = re.search(r'(\d{1,2})\s*(コース|本).*?(滑走|オープン|可)', text_body)
                 if match_c:
                     data["open_count"] = int(match_c.group(1))
         else:
             data["status"] = f"エラー({res.status_code})"
             
-    except requests.exceptions.Timeout:
-        data["status"] = "応答なし"
-    except Exception as e:
-        data["status"] = "取得失敗" # セキュリティブロックなど
+    except Exception:
+        pass # エラー時は初期値のまま
         
     return data
 
@@ -295,9 +308,8 @@ def fmt_time(m):
 # --- メイン処理 ---
 st.markdown(f"""
 <div class="update-info">
-    <b>🔄 データ更新状況 ({ACCESS_TIME})</b><br>
-    公式サイトからリアルタイムでスクレイピング中。表組みやリスト構造も解析しています。<br>
-    <span style="font-size:0.8em">※Bot対策等で「取得失敗」となる場合もありますが、可能な限り最新情報を表示します。</span>
+    <b>🔄 スクレイピング実行中 ({ACCESS_TIME})</b><br>
+    夏油高原・八幡平などは専用ロジックで解析中です。その他は汎用解析を試行しています。
 </div>
 """, unsafe_allow_html=True)
 
@@ -316,8 +328,8 @@ total = len(base_resorts)
 for i, r in enumerate(base_resorts):
     progress_bar.progress(10 + int((i/total)*90), text=f"{r['name']} サイト解析中...")
     
-    # スクレイピング
-    scraped = scrape_resort(r['url'], r['total'])
+    # スクレイピング (リゾート名も渡して個別対応)
+    scraped = scrape_resort(r['url'], r['name'], r['total'])
     
     is_open = "営業" in scraped["status"] or "可" in scraped["status"]
     if filter_open_only and not is_open:
@@ -329,7 +341,7 @@ for i, r in enumerate(base_resorts):
     
     # 表示加工
     status_html = scraped['status']
-    if "⛔" in status_html or "エラー" in status_html or "失敗" in status_html: 
+    if "⛔" in status_html or "エラー" in status_html: 
         status_html = f'<span class="status-ng">{status_html}</span>'
     elif "確認中" in status_html or "不明" in status_html:
         status_html = f'<span class="status-warn">{status_html}</span>'
@@ -340,20 +352,17 @@ for i, r in enumerate(base_resorts):
     if snow_val == "未取得" or snow_val == "記載なし": snow_val = '<span class="no-data">-</span>'
     else: snow_val = f"<b>{snow_val}</b>"
 
-    # コース数表示 (オープン数 / 全数)
     open_val = scraped['open_count']
     if open_val == "?": open_val = '<span class="no-data">?</span>'
-    
     course_disp = f"<b>{open_val}</b> / {r['total']}"
 
-    # 名称短縮
     short_name = r["name"]
     if "オーパス" in short_name: short_name = "オーパス"
     else: short_name = short_name.replace("ファミリースキー場", "ファミリー").replace("スキー場", "")
 
     df_list.append({
         "スキー場": short_name,
-        "オープン": r.get("open_date_str", "-"), # 復活
+        "オープン": r.get("open_date_str", "-"),
         "積雪": snow_val,
         "状況": status_html,
         "コース数<br><span style='font-size:0.8em'>(開/全)</span>": course_disp,
@@ -377,12 +386,10 @@ if count == 0:
 else:
     df = pd.DataFrame(df_list)
     
-    # 1. 一覧
     st.subheader("📋 リアルタイム状況一覧")
     html = df.drop(columns=["lat", "lon", "raw_status", "full_name"]).to_html(classes="table", escape=False, index=False)
     st.markdown(f'<div class="table-container">{html}</div>', unsafe_allow_html=True)
     
-    # 2. カメラ
     st.divider()
     st.subheader("📷 ライブカメラ")
     cols_per_row = 3
@@ -400,7 +407,6 @@ else:
                 st.markdown(f"**{cam['name']}**")
                 st.markdown(f"[![cam]({thumb})]({cam['live']})")
     
-    # 3. マップ
     st.divider()
     st.subheader("🗺️ マップ")
     m = folium.Map(location=[39.8, 140.5], zoom_start=9)
